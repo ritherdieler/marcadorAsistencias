@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tema global de la aplicacion. */
+:root {
+  --brand-blue: 11 45 91;
+  --brand-orange: 214 106 0;
+  --brand-bg: 255 255 255;
+  --brand-soft: 217 234 247;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply antialiased;
+  background: rgb(var(--brand-bg));
+}
