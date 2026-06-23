@@ -21,8 +21,9 @@ Tabs (Existente / Nuevo)
 | Pieza | Responsabilidad |
 |-------|-----------------|
 | [`hooks/useFaceEnrollment.ts`](../src/features/personnel/hooks/useFaceEnrollment.ts) | Lógica: cámara, loop de detección, estimación de pose, gating de calidad, countdown, captura/recaptura por ángulo, mensajes. Expone estado + handlers (sin JSX). |
-| [`registration/CameraStage.tsx`](../src/features/personnel/components/registration/CameraStage.tsx) | Video 16:9 espejado (selfie) + overlay + región de estado `aria-live` + selector de cámara + estado de permiso denegado. |
-| [`registration/FaceBoxOverlay.tsx`](../src/features/personnel/components/registration/FaceBoxOverlay.tsx) | Dibuja el `box` real del rostro (MediaPipe) en vivo; color por estado (buscando/alineado/aviso). |
+| [`registration/CameraStage.tsx`](../src/features/personnel/components/registration/CameraStage.tsx) | Video 16:9 espejado (selfie) + overlay + indicador de cobertura + región de estado `aria-live` + selector de cámara + estado de permiso denegado. |
+| [`recognition/components/FaceBoxOverlay.tsx`](../src/features/recognition/components/FaceBoxOverlay.tsx) | Dibuja el `box` real del rostro (MediaPipe) en vivo; color por estado (buscando/alineado/aviso). |
+| [`recognition/components/FaceCoverageIndicator.tsx`](../src/features/recognition/components/FaceCoverageIndicator.tsx) | Badge en vivo con % de ancho del rostro, barra hacia objetivo 30% y colores por estado. |
 | [`registration/CaptureCountdown.tsx`](../src/features/personnel/components/registration/CaptureCountdown.tsx) | Cuenta 3‑2‑1 al mantener la pose alineada. |
 | [`registration/CaptureProgressRing.tsx`](../src/features/personnel/components/registration/CaptureProgressRing.tsx) | Anillo de progreso con `role="progressbar"`. |
 | [`registration/CapturedThumbnails.tsx`](../src/features/personnel/components/registration/CapturedThumbnails.tsx) | Miniaturas por ángulo con recaptura individual. |
@@ -37,8 +38,8 @@ En `useFaceEnrollment`, por cada frame (cada `280 ms`):
 
 1. `detectVisibleFacePose(video)` → `{ visible, pose, box }`.
 2. Sin `box` real ⇒ estado `searching` (no captura).
-3. Con `box`: `evaluateAlignment(box, pose, angle)`:
-   - `too_far` / `too_close` por área del rostro (`0.045`–`0.62`).
+3. Con `box`: `evaluateFaceAlignment(box, pose, angle)`:
+   - `too_far` / `too_close` por **ancho del rostro** (`minFaceWidth: 0.30` = 30%, `maxFaceWidth: 0.75` = 75%).
    - `off_center` por centrado (tolerancia `0.16` frontal, `0.30` en giros).
    - `wrong_pose` si la pose no coincide con el ángulo objetivo.
    - `aligned` en caso correcto.
@@ -75,17 +76,25 @@ El `<video>` se muestra con `-scale-x-100`. El overlay invierte la coordenada X 
 
 La logica de alineacion del rostro vive en [`recognition/services/faceAlignment.ts`](../src/features/recognition/services/faceAlignment.ts) y se reutiliza en registro y marcacion:
 
-- `evaluateFaceAlignment(box, pose, expectedPose)` → `too_far | too_close | off_center | wrong_pose | aligned | searching`. Pasar `expectedPose = null` omite el chequeo de pose (marcacion).
-- `faceAlignmentMessage(alignment)` → mensaje en español ("Acercate...", "Alejate...", "Centra tu rostro...").
-- [`recognition/components/FaceBoxOverlay.tsx`](../src/features/recognition/components/FaceBoxOverlay.tsx): box real del rostro con color por estado, compartido por ambas pantallas.
+| Constante | Valor | Efecto |
+|-----------|-------|--------|
+| `minFaceWidth` | **0.30** (30%) | Rostro demasiado lejos → `too_far` |
+| `maxFaceWidth` | **0.75** (75%) | Rostro demasiado cerca → `too_close` |
+| `FACE_ALIGNMENT_TARGET_WIDTH_PERCENT` | **30** | Objetivo visible en UI y mensajes |
+
+- `getFaceWidthPercent(box)` → porcentaje entero del ancho del rostro sobre el frame.
+- `evaluateFaceAlignment(box, pose, expectedPose)` → estados de alineacion. Pasar `expectedPose = null` omite el chequeo de pose (marcacion).
+- `faceAlignmentMessage(alignment, { widthPercent })` → mensaje con dato en vivo, ej. *"Rostro al 18% de ancho. Objetivo: 30%. Acercate."*
+- [`FaceBoxOverlay`](../src/features/recognition/components/FaceBoxOverlay.tsx): box real del rostro con color por estado.
+- [`FaceCoverageIndicator`](../src/features/recognition/components/FaceCoverageIndicator.tsx): badge superpuesto con % en vivo y barra con marca en 30%.
 
 ### Marcacion de asistencia
 
 En [`AttendanceMarker`](../src/features/attendance/components/AttendanceMarker.tsx):
 
-- Se dibuja el `FaceBoxOverlay` en vivo sobre el video (reemplaza el ovalo estatico).
-- El mensaje guia al usuario: distancia/centrado antes de identificar; "Manten la posicion, identificando..." cuando esta alineado.
-- La identificacion (`identifyCurrentFace`) solo dispara la captura+red cuando `alignment === 'aligned'`; si MediaPipe no entrega `box` (fallback), se mantiene el comportamiento previo. El video no se espeja (uso tipo kiosko).
+- `FaceBoxOverlay` + `FaceCoverageIndicator` en vivo sobre el video.
+- Mensajes con porcentaje en la region `aria-live="polite"`.
+- La identificacion solo dispara cuando `alignment === 'aligned'` (ancho >= 30%, centrado). El video no se espeja (kiosko).
 
 ## Build verification (2026-06-23)
 

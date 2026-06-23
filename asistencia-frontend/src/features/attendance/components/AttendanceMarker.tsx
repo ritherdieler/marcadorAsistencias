@@ -16,8 +16,14 @@ import type { User } from '../../../types/user'
 import { formatUserRole } from '../../../utils/userRole'
 import { captureFacePhoto } from '../../recognition/services/cameraEvidence'
 import { FaceBoxOverlay } from '../../recognition/components/FaceBoxOverlay'
+import { FaceCoverageIndicator } from '../../recognition/components/FaceCoverageIndicator'
 import { detectVisibleFacePose, type FaceBox } from '../../recognition/services/facePresenceDetector'
-import { evaluateFaceAlignment, faceAlignmentMessage, type FaceAlignment } from '../../recognition/services/faceAlignment'
+import {
+  evaluateFaceAlignment,
+  faceAlignmentMessage,
+  getFaceWidthPercent,
+  type FaceAlignment,
+} from '../../recognition/services/faceAlignment'
 
 type AttendanceResult = {
   title: string
@@ -713,8 +719,8 @@ export function AttendanceMarker() {
               ? alignment === 'searching'
                 ? 'Coloca tu rostro frente a la camara'
                 : alignment === 'aligned'
-                  ? 'Manten la posicion, identificando...'
-                  : faceAlignmentMessage(alignment)
+                  ? `Rostro al ${getFaceWidthPercent(faceBox)}% de ancho. Manten la posicion, identificando...`
+                  : faceAlignmentMessage(alignment, { widthPercent: getFaceWidthPercent(faceBox) })
               : status
 
   return (
@@ -894,9 +900,16 @@ export function AttendanceMarker() {
       <div className="relative overflow-hidden rounded-xl bg-black ring-1 ring-black/10">
         <video ref={videoRef} className="aspect-video w-full object-cover" playsInline muted autoPlay />
         {cameraEnabled && cameraReady && <FaceBoxOverlay box={faceBox} alignment={alignment} />}
+        {cameraEnabled && cameraReady && (
+          <FaceCoverageIndicator widthPercent={getFaceWidthPercent(faceBox)} alignment={alignment} />
+        )}
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800">
+      <div
+        role="status"
+        aria-live="polite"
+        className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800"
+      >
         {showSyncMessage || showProcessingFaceMessage ? (
           <div className="flex items-center gap-3">
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-brand-blue" aria-hidden="true" />

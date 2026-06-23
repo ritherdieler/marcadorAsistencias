@@ -8,27 +8,33 @@ export type FaceAlignment =
   | 'wrong_pose'
   | 'aligned'
 
+export const FACE_ALIGNMENT_TARGET_WIDTH_PERCENT = 30
+
 export const FACE_ALIGNMENT = {
-  minFaceArea: 0.045,
-  maxFaceArea: 0.62,
+  minFaceWidth: 0.3,
+  maxFaceWidth: 0.75,
   centerToleranceFront: 0.16,
   centerToleranceTurn: 0.3,
   centerTargetY: 0.46,
 } as const
 
-/**
- * Evaluates whether a detected face is well positioned for capture.
- * Pass `expectedPose = null` to skip the pose check (e.g. attendance, where any
- * well-framed frontal-ish face is acceptable).
- */
+export type FaceAlignmentMessageOptions = {
+  widthPercent?: number
+  targetPercent?: number
+  poseInstruction?: string
+}
+
+export function getFaceWidthPercent(box: FaceBox | null): number {
+  return box ? Math.round(box.width * 100) : 0
+}
+
 export function evaluateFaceAlignment(
   box: FaceBox,
   pose: FacePose,
   expectedPose: FacePose | null,
 ): FaceAlignment {
-  const area = box.width * box.height
-  if (area < FACE_ALIGNMENT.minFaceArea) return 'too_far'
-  if (area > FACE_ALIGNMENT.maxFaceArea) return 'too_close'
+  if (box.width < FACE_ALIGNMENT.minFaceWidth) return 'too_far'
+  if (box.width > FACE_ALIGNMENT.maxFaceWidth) return 'too_close'
 
   const tolerance =
     expectedPose && expectedPose !== 'front'
@@ -42,19 +48,32 @@ export function evaluateFaceAlignment(
   return 'aligned'
 }
 
-export function faceAlignmentMessage(alignment: FaceAlignment, poseInstruction?: string): string {
+function widthPrefix(options: FaceAlignmentMessageOptions): string {
+  if (options.widthPercent === undefined) return ''
+  const target = options.targetPercent ?? FACE_ALIGNMENT_TARGET_WIDTH_PERCENT
+  return `Rostro al ${options.widthPercent}% de ancho. Objetivo: ${target}%. `
+}
+
+export function faceAlignmentMessage(
+  alignment: FaceAlignment,
+  options?: FaceAlignmentMessageOptions | string,
+): string {
+  const opts: FaceAlignmentMessageOptions =
+    typeof options === 'string' ? { poseInstruction: options } : (options ?? {})
+  const prefix = widthPrefix(opts)
+
   switch (alignment) {
     case 'too_far':
-      return 'Acercate un poco a la camara.'
+      return `${prefix}Acercate un poco a la camara.`
     case 'too_close':
-      return 'Alejate un poco de la camara.'
+      return `${prefix}Alejate un poco de la camara.`
     case 'off_center':
-      return 'Centra tu rostro dentro del marco.'
+      return `${prefix}Centra tu rostro dentro del marco.`
     case 'wrong_pose':
-      return poseInstruction ?? 'Ajusta la posicion del rostro.'
+      return `${prefix}${opts.poseInstruction ?? 'Ajusta la posicion del rostro.'}`
     case 'searching':
       return 'Coloca tu rostro dentro del marco.'
     default:
-      return 'Posicion correcta.'
+      return prefix ? `${prefix}Posicion correcta.` : 'Posicion correcta.'
   }
 }

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useCamera } from '../../../hooks/useCamera'
 import { captureFacePhoto } from '../../recognition/services/cameraEvidence'
 import { detectVisibleFacePose, type FaceBox } from '../../recognition/services/facePresenceDetector'
-import { evaluateFaceAlignment, type FaceAlignment } from '../../recognition/services/faceAlignment'
+import { evaluateFaceAlignment, faceAlignmentMessage, getFaceWidthPercent, type FaceAlignment } from '../../recognition/services/faceAlignment'
 
 export type CaptureAngle = 'front' | 'left' | 'right'
 
@@ -36,23 +36,6 @@ const angleLabel = (angle: CaptureAngle): string =>
 
 const angleInstruction = (angle: CaptureAngle): string =>
   ENROLLMENT_ANGLES.find((item) => item.key === angle)?.instruction ?? ''
-
-function alignmentMessage(alignment: FaceAlignment, angle: CaptureAngle): string {
-  switch (alignment) {
-    case 'too_far':
-      return 'Acercate un poco a la camara.'
-    case 'too_close':
-      return 'Alejate un poco de la camara.'
-    case 'off_center':
-      return 'Centra tu rostro dentro del marco.'
-    case 'wrong_pose':
-      return angleInstruction(angle)
-    case 'searching':
-      return 'Coloca tu rostro dentro del marco.'
-    default:
-      return 'Posicion correcta.'
-  }
-}
 
 interface UseFaceEnrollmentOptions {
   active: boolean
@@ -192,13 +175,20 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
         if (quality !== 'aligned') {
           alignedSinceRef.current = null
           setCountdown(null)
-          setStatusMessage(alignmentMessage(quality, angle))
+          setStatusMessage(
+            faceAlignmentMessage(quality, {
+              widthPercent: getFaceWidthPercent(result.box),
+              poseInstruction: angleInstruction(angle),
+            }),
+          )
           return
         }
 
         if (!autoCaptureRef.current) {
           setCountdown(null)
-          setStatusMessage('Posicion correcta.')
+          setStatusMessage(
+            faceAlignmentMessage('aligned', { widthPercent: getFaceWidthPercent(result.box) }),
+          )
           return
         }
 
@@ -208,7 +198,9 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
         const remaining = Math.max(0, ALIGN_HOLD_MS - elapsed)
         const tick = Math.ceil(remaining / 500)
         setCountdown(tick > 0 ? tick : null)
-        setStatusMessage('Manten la posicion...')
+        setStatusMessage(
+          `Rostro al ${getFaceWidthPercent(result.box)}% de ancho. Manten la posicion...`,
+        )
 
         if (elapsed >= ALIGN_HOLD_MS) {
           await doCapture(video, angle)

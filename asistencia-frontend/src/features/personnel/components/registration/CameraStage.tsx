@@ -2,7 +2,9 @@ import type { RefObject } from 'react'
 
 import { Alert } from '../../../../components/ui/Alert'
 import { FaceBoxOverlay } from '../../../recognition/components/FaceBoxOverlay'
+import { FaceCoverageIndicator } from '../../../recognition/components/FaceCoverageIndicator'
 import type { FaceAlignment } from '../../../recognition/services/faceAlignment'
+import { getFaceWidthPercent } from '../../../recognition/services/faceAlignment'
 import type { FaceBox } from '../../../recognition/services/facePresenceDetector'
 import { CaptureCountdown } from './CaptureCountdown'
 
@@ -64,6 +66,9 @@ export function CameraStage({
         )}
 
         {showVideo && <FaceBoxOverlay box={faceBox} alignment={alignment} mirror={mirror} />}
+        {showVideo && (
+          <FaceCoverageIndicator widthPercent={getFaceWidthPercent(faceBox)} alignment={alignment} />
+        )}
         {showVideo && <CaptureCountdown value={countdown} />}
 
         {permissionDenied && (
