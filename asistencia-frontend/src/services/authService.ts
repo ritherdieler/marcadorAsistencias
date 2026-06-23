@@ -1,5 +1,6 @@
-import { http } from './httpClient' // Cliente HTTP configurado (baseURL, interceptores)
-import type { User } from '../types/user' // Tipos del dominio (tabla user)
+import { http } from './httpClient'
+import type { User } from '../types/user'
+import { encryptWithSHA384 } from '../utils/sha384'
 
 export interface LoginRequest {
   username: string // Usuario/login
@@ -10,8 +11,9 @@ export interface LoginRequest {
 export type LoginResponse = User
 
 export async function login(req: LoginRequest): Promise<LoginResponse> {
-  // Endpoint real según tu UserController.kt:
-  // @RequestMapping("users") + @PostMapping("/login") => POST /users/login. // Backend
-  const { data } = await http.post<LoginResponse>('/users/login', req) // Envía credenciales
-  return data // Retorna el usuario (UserDto)
+  const { data } = await http.post<LoginResponse>('/users/login', {
+    username: req.username,
+    password: await encryptWithSHA384(req.password),
+  })
+  return data
 }

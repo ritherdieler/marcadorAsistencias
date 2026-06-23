@@ -1,4 +1,5 @@
 import type { User } from '../types/user'
+import { encryptWithSHA384 } from '../utils/sha384'
 import { http } from './httpClient'
 
 type FaceAction = 'CHECK_IN' | 'CHECK_OUT'
@@ -184,8 +185,10 @@ export async function verifyFacePhoto(photo: Blob, action: FaceAction, occurredA
 }
 
 export async function verifyAttendanceWithPassword(req: PasswordAttendanceRequest): Promise<VerifyFaceResponse> {
-  // Fallback operativo: el backend valida credenciales y decide si registra entrada o salida.
-  const { data } = await http.post<RawVerifyFaceResponse>('/api/face/verify/password', req)
+  const { data } = await http.post<RawVerifyFaceResponse>('/api/face/verify/password', {
+    ...req,
+    password: await encryptWithSHA384(req.password),
+  })
   return normalizeVerifyFaceResponse(data)
 }
 

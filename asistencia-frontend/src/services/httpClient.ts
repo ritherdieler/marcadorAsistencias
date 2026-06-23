@@ -2,6 +2,7 @@ import axios from 'axios' // Librería HTTP
 
 import { env } from '../utils/env' // Variables de entorno (VITE_*)
 
+
 const http = axios.create({
   baseURL: env.apiBaseUrl ?? 'http://localhost:8080/ispadmin', // Por defecto: puerto 8080 + context-path /ispadmin (según tu application.properties)
   timeout: 20000, // Timeout de red (ms)

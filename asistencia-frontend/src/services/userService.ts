@@ -1,5 +1,6 @@
 import { http } from './httpClient'
 import type { User, UserType } from '../types/user'
+import { encryptWithSHA384 } from '../utils/sha384'
 
 export async function getAllUsers(): Promise<User[]> {
   const { data } = await http.get<User[]>('/users')
@@ -30,7 +31,7 @@ export async function createUser(req: CreateUserRequest): Promise<User> {
     email: req.email ?? null,
     phone: req.phone ?? null,
     username: req.username,
-    password: req.password,
+    password: await encryptWithSHA384(req.password),
     type: req.type,
     verified: req.verified ?? true,
   }
