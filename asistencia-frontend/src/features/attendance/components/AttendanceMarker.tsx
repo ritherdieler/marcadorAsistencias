@@ -15,7 +15,7 @@ import { identifyFacePhoto, saveFaceEvidencePhoto, verifyAttendanceWithPassword,
 import type { User } from '../../../types/user'
 import { formatUserRole } from '../../../utils/userRole'
 import { captureVideoFrameBlob } from '../../recognition/services/cameraEvidence'
-import { hasVisibleFace } from '../../recognition/services/facePresenceDetector'
+import { detectVisibleFacePose, type FaceBox } from '../../recognition/services/facePresenceDetector'
 
 type AttendanceResult = {
   title: string
@@ -34,12 +34,28 @@ type IdentifiedPerson = {
 }
 
 const ATTENDANCE_CAPTURE_FORMAT = 'jpeg'
+const ATTENDANCE_CAPTURE_QUALITY = 0.92
 const ATTENDANCE_CAPTURE_MAX_WIDTH = 960
 const ATTENDANCE_CAPTURE_MAX_HEIGHT = 720
+const FACE_LOST_CLEAR_MS = 900
+const IDENTIFICATION_STALE_MS = 5000
+const FACE_CENTER_SHIFT_THRESHOLD = 0.18
+const FACE_SIZE_CHANGE_THRESHOLD = 0.45
 
 function getCurrentTimeLabel() {
   // Centraliza el formato de hora que se muestra cuando una marcacion queda pendiente.
   return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+function didFaceChangeSignificantly(previous: FaceBox | null, current?: FaceBox): boolean {
+  if (!previous || !current) return false
+
+  const centerShift = Math.hypot(current.centerX - previous.centerX, current.centerY - previous.centerY)
+  const previousArea = Math.max(previous.width * previous.height, 0.0001)
+  const currentArea = Math.max(current.width * current.height, 0.0001)
+  const sizeChange = Math.abs(currentArea - previousArea) / previousArea
+
+  return centerShift > FACE_CENTER_SHIFT_THRESHOLD || sizeChange > FACE_SIZE_CHANGE_THRESHOLD
 }
 
 export function AttendanceMarker() {
@@ -49,10 +65,15 @@ export function AttendanceMarker() {
   const [cameraEnabled, setCameraEnabled] = useState(false)
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const offlinePendingCountRef = useRef(0)
+  const identityAttemptRef = useRef(0)
+  const lastFaceBoxRef = useRef<FaceBox | null>(null)
+  const faceMissingSinceRef = useRef<number | null>(null)
+  const identityConfirmedAtRef = useRef<number | null>(null)
   const [status, setStatus] = useState('Camara apagada')
   const [message, setMessage] = useState<string | null>(null)
   const [messageType, setMessageType] = useState<'info' | 'error'>('info')
   const [identified, setIdentified] = useState<IdentifiedPerson | null>(null)
+  const [unrecognizedDialog, setUnrecognizedDialog] = useState<string | null>(null)
   const [result, setResult] = useState<AttendanceResult | null>(null)
   const [identifying, setIdentifying] = useState(false)
   const [processingFace, setProcessingFace] = useState(false)
@@ -65,6 +86,22 @@ export function AttendanceMarker() {
   const [fallbackPassword, setFallbackPassword] = useState('')
   const [fallbackLoading, setFallbackLoading] = useState(false)
 
+  const clearCurrentIdentity = useCallback((clearDialogs = true) => {
+    identityAttemptRef.current += 1
+    lastFaceBoxRef.current = null
+    faceMissingSinceRef.current = null
+    identityConfirmedAtRef.current = null
+    setIdentified(null)
+    setIdentifying(false)
+    setProcessingFace(false)
+    setConfirming(false)
+    setCheckingOut(false)
+    if (clearDialogs) {
+      setUnrecognizedDialog(null)
+      setResult(null)
+    }
+  }, [])
+
   const closePasswordFallback = useCallback(() => {
     // Limpia credenciales para que no queden visibles si el modal se vuelve a abrir.
     setPasswordFallbackOpen(false)
@@ -75,13 +112,8 @@ export function AttendanceMarker() {
   const turnCameraOff = useCallback(() => {
     setCameraEnabled(false)
     setCameraReady(false)
-    setIdentified(null)
-    setResult(null)
+    clearCurrentIdentity()
     setMessage(null)
-    setIdentifying(false)
-    setProcessingFace(false)
-    setConfirming(false)
-    setCheckingOut(false)
     setStatus('Camara apagada')
 
     const video = videoRef.current
@@ -90,7 +122,17 @@ export function AttendanceMarker() {
     }
 
     stop()
-  }, [stop, videoRef])
+  }, [clearCurrentIdentity, stop, videoRef])
+
+  const retryUnrecognizedFace = useCallback(() => {
+    setUnrecognizedDialog(null)
+    setMessage(null)
+  }, [])
+
+  const cancelUnrecognizedFace = useCallback(() => {
+    setUnrecognizedDialog(null)
+    turnCameraOff()
+  }, [turnCameraOff])
 
   const sendConfirmedEvidenceInBackground = useCallback((photo: Blob, reason: string, userId?: number | null) => {
     // Envia la evidencia al backend sin bloquear el boton; el backend se encarga de subirla a Firebase.
@@ -243,31 +285,54 @@ export function AttendanceMarker() {
   }, [offlinePendingCount, synchronizeOfflineRecords])
 
   const identifyCurrentFace = useCallback(async () => {
-    if (!cameraEnabled || !cameraReady || !stream || identifying || confirming || identified || result) return
+    if (!cameraEnabled || !cameraReady || !stream || identifying || confirming || identified || unrecognizedDialog || result) return
 
     setIdentifying(true)
     let capturedPhoto: Blob | null = null
+    const attemptId = identityAttemptRef.current
 
     try {
       const video = videoRef.current
       if (!video || video.readyState < 2) return
 
-      const faceVisible = await hasVisibleFace(video)
-      if (!faceVisible) {
+      const faceState = await detectVisibleFacePose(video)
+      if (!faceState.visible) {
+        const now = Date.now()
+        faceMissingSinceRef.current ??= now
+        if (now - faceMissingSinceRef.current >= FACE_LOST_CLEAR_MS) {
+          clearCurrentIdentity()
+        }
         setMessage(null)
         return
       }
 
+      faceMissingSinceRef.current = null
+      if (didFaceChangeSignificantly(lastFaceBoxRef.current, faceState.box)) {
+        clearCurrentIdentity()
+        return
+      }
+      lastFaceBoxRef.current = faceState.box ?? null
+
       setProcessingFace(true)
       capturedPhoto = await captureVideoFrameBlob(video, {
         format: ATTENDANCE_CAPTURE_FORMAT,
-        quality: 0.9,
+        quality: ATTENDANCE_CAPTURE_QUALITY,
         maxWidth: ATTENDANCE_CAPTURE_MAX_WIDTH,
         maxHeight: ATTENDANCE_CAPTURE_MAX_HEIGHT,
         enhanceLowLight: true,
       })
 
+      if (attemptId !== identityAttemptRef.current) return
+
       const res = await identifyFacePhoto(capturedPhoto)
+      if (attemptId !== identityAttemptRef.current) return
+
+      const currentFaceState = await detectVisibleFacePose(video)
+      if (!currentFaceState.visible || didFaceChangeSignificantly(faceState.box ?? null, currentFaceState.box)) {
+        clearCurrentIdentity()
+        return
+      }
+
       if (res.requiresReenrollment) {
         setResult({
           title: 'Revalidacion facial requerida',
@@ -279,8 +344,8 @@ export function AttendanceMarker() {
       }
 
       if (!res.matched || !res.user) {
-        setMessageType('error')
-        setMessage(res.message ?? 'Rostro no reconocido.')
+        setMessage(null)
+        setUnrecognizedDialog(res.message ?? 'No pudimos identificar este rostro.')
         return
       }
 
@@ -293,6 +358,7 @@ export function AttendanceMarker() {
       }
 
       setMessage(null)
+      identityConfirmedAtRef.current = Date.now()
       setIdentified({
         user: res.user,
         photo: capturedPhoto,
@@ -300,16 +366,19 @@ export function AttendanceMarker() {
       })
     } catch (error) {
       if (isConnectionError(error) && capturedPhoto) {
+        if (attemptId !== identityAttemptRef.current) return
         setIsOnline(false)
         try {
           const offlineIdentity = await identifyOfflineFace(capturedPhoto)
+          if (attemptId !== identityAttemptRef.current) return
           if (!offlineIdentity) {
-            setMessageType('error')
-            setMessage('Sin conexion. No se pudo reconocer el rostro con el dataset offline guardado.')
+            setMessage(null)
+            setUnrecognizedDialog('Sin conexion. No pudimos reconocer el rostro con el dataset offline guardado.')
             return
           }
 
           setMessage(null)
+          identityConfirmedAtRef.current = Date.now()
           setIdentified(offlineIdentity)
           return
         } catch {
@@ -329,7 +398,7 @@ export function AttendanceMarker() {
       setIdentifying(false)
       setProcessingFace(false)
     }
-  }, [cameraEnabled, cameraReady, confirming, identified, identifyOfflineFace, identifying, result, stream, videoRef])
+  }, [cameraEnabled, cameraReady, clearCurrentIdentity, confirming, identified, identifyOfflineFace, identifying, result, stream, unrecognizedDialog, videoRef])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -338,6 +407,51 @@ export function AttendanceMarker() {
 
     return () => window.clearInterval(timer)
   }, [identifyCurrentFace])
+
+  useEffect(() => {
+    if (!identified || !cameraEnabled || !cameraReady || !stream || confirming || checkingOut) return
+
+    let cancelled = false
+
+    async function watchIdentifiedFace() {
+      const video = videoRef.current
+      if (!video || video.readyState < 2) return
+
+      const faceState = await detectVisibleFacePose(video)
+      if (cancelled) return
+
+      if (!faceState.visible) {
+        const now = Date.now()
+        faceMissingSinceRef.current ??= now
+        if (now - faceMissingSinceRef.current >= FACE_LOST_CLEAR_MS) {
+          clearCurrentIdentity()
+        }
+        return
+      }
+
+      faceMissingSinceRef.current = null
+
+      if (didFaceChangeSignificantly(lastFaceBoxRef.current, faceState.box)) {
+        clearCurrentIdentity()
+        return
+      }
+
+      lastFaceBoxRef.current = faceState.box ?? lastFaceBoxRef.current
+
+      if (identityConfirmedAtRef.current && Date.now() - identityConfirmedAtRef.current >= IDENTIFICATION_STALE_MS) {
+        clearCurrentIdentity(false)
+      }
+    }
+
+    const timer = window.setInterval(() => {
+      void watchIdentifiedFace()
+    }, 350)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [cameraEnabled, cameraReady, checkingOut, clearCurrentIdentity, confirming, identified, stream, videoRef])
 
   async function confirmAttendance() {
     if (!identified) return
@@ -430,7 +544,7 @@ export function AttendanceMarker() {
         }
         photo = await captureVideoFrameBlob(video, {
           format: ATTENDANCE_CAPTURE_FORMAT,
-          quality: 0.9,
+          quality: ATTENDANCE_CAPTURE_QUALITY,
           maxWidth: ATTENDANCE_CAPTURE_MAX_WIDTH,
           maxHeight: ATTENDANCE_CAPTURE_MAX_HEIGHT,
           enhanceLowLight: true,
@@ -595,6 +709,34 @@ export function AttendanceMarker() {
 
   return (
     <div className="space-y-4">
+      {unrecognizedDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">
+            <div className="h-2 bg-red-500" />
+            <div className="p-6">
+              <div className="flex items-start gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-red-50 text-lg font-black text-red-700">
+                  !
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-950">Rostro no reconocido</h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{unrecognizedDialog}</p>
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                <LoadingButton type="button" variant="dark" onClick={cancelUnrecognizedFace}>
+                  Cancelar
+                </LoadingButton>
+                <LoadingButton type="button" variant="primary" onClick={retryUnrecognizedFace}>
+                  Reintentar
+                </LoadingButton>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {identified && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
           <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">

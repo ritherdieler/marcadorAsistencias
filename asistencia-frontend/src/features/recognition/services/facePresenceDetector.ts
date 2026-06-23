@@ -8,6 +8,23 @@ const MIN_FACE_AREA_RATIO = 0.006
 const MIN_FACE_SCORE = 0.2
 const MIN_FRAME_EDGE_RATIO = 0.004
 const MIN_FRAME_SKIN_RATIO = 0.004
+const FACE_POSE_FRONT_THRESHOLD = 0.09
+const FACE_POSE_TURN_THRESHOLD = 0.105
+
+export type FacePose = 'front' | 'left' | 'right' | 'unknown'
+
+export type FacePoseResult = {
+  visible: boolean
+  pose: FacePose
+  box?: FaceBox
+}
+
+export type FaceBox = {
+  centerX: number
+  centerY: number
+  width: number
+  height: number
+}
 
 // Carga una sola instancia de MediaPipe FaceDetector para reutilizarla en cada frame.
 async function getFaceDetector(): Promise<FaceDetector> {
@@ -51,6 +68,32 @@ export async function hasVisibleFace(video: HTMLVideoElement): Promise<boolean> 
   }
 }
 
+export async function detectVisibleFacePose(video: HTMLVideoElement): Promise<FacePoseResult> {
+  if (!video.videoWidth || !video.videoHeight || video.readyState < 2) {
+    return { visible: false, pose: 'unknown' }
+  }
+
+  try {
+    const detector = await getFaceDetector()
+    const result = detector.detectForVideo(video, performance.now())
+    const usableFaces = result.detections.filter((face) => isUsableFace(face, video))
+    const mainFace = usableFaces[0]
+
+    if (mainFace) {
+      return {
+        visible: true,
+        pose: estimateFacePose(mainFace, video),
+        box: toNormalizedFaceBox(mainFace, video),
+      }
+    }
+
+    return { visible: hasHumanLikeFrame(video), pose: 'unknown' }
+  } catch {
+    detectorPromise = null
+    return { visible: hasHumanLikeFrame(video), pose: 'unknown' }
+  }
+}
+
 // Valida calidad basica del rostro: confianza y tamano.
 // El recuadro de pantalla es una guia visual; la identidad final siempre la confirma el backend DJL.
 function isUsableFace(face: Detection, video: HTMLVideoElement): boolean {
@@ -67,6 +110,42 @@ function isUsableFace(face: Detection, video: HTMLVideoElement): boolean {
   if (faceRatio < MIN_FACE_AREA_RATIO) return false
 
   return true
+}
+
+function estimateFacePose(face: Detection, video: HTMLVideoElement): FacePose {
+  const box = face.boundingBox
+  const nose = findKeypoint(face, 'nose', 2)
+  if (!box || !nose || box.width <= 0) return 'unknown'
+
+  const leftEye = findKeypoint(face, 'left eye', 1)
+  const rightEye = findKeypoint(face, 'right eye', 0)
+  const eyeCenterX = leftEye && rightEye ? ((leftEye.x + rightEye.x) / 2) * video.videoWidth : null
+  const boxCenterX = box.originX + box.width / 2
+  const centerX = eyeCenterX ?? boxCenterX
+  const noseX = nose.x * video.videoWidth
+  const noseOffsetRatio = (noseX - centerX) / box.width
+
+  if (Math.abs(noseOffsetRatio) <= FACE_POSE_FRONT_THRESHOLD) return 'front'
+  if (noseOffsetRatio >= FACE_POSE_TURN_THRESHOLD) return 'left'
+  if (noseOffsetRatio <= -FACE_POSE_TURN_THRESHOLD) return 'right'
+  return 'unknown'
+}
+
+function toNormalizedFaceBox(face: Detection, video: HTMLVideoElement): FaceBox | undefined {
+  const box = face.boundingBox
+  if (!box || box.width <= 0 || box.height <= 0) return undefined
+
+  const width = box.width / video.videoWidth
+  const height = box.height / video.videoHeight
+  const centerX = (box.originX + box.width / 2) / video.videoWidth
+  const centerY = (box.originY + box.height / 2) / video.videoHeight
+
+  return { centerX, centerY, width, height }
+}
+
+function findKeypoint(face: Detection, labelPart: string, fallbackIndex: number) {
+  const byLabel = face.keypoints.find((keypoint) => keypoint.label?.toLowerCase().includes(labelPart))
+  return byLabel ?? face.keypoints[fallbackIndex] ?? null
 }
 
 // Respaldo liviano: evita bloquear la camara cuando MediaPipe falla, pero no acepta fondos planos.

@@ -4,24 +4,44 @@ import { Alert } from '../../../components/ui/Alert'
 import { LoadingButton } from '../../../components/ui/LoadingButton'
 import { ModalAlert } from '../../../components/ui/ModalAlert'
 import { useCamera } from '../../../hooks/useCamera'
-import { getAllUsers } from '../../../services/userService'
-import type { User, UserType } from '../../../types/user'
-import { formatUserRole, userRoleOptions } from '../../../utils/userRole'
+import type { UserType } from '../../../types/user'
+import { userRoleOptions } from '../../../utils/userRole'
 import { sanitizePersonName, sanitizePhone } from '../../../utils/validators'
 import { captureVideoFrameBlob } from '../../recognition/services/cameraEvidence'
-import { hasVisibleFace } from '../../recognition/services/facePresenceDetector'
-import { createUserAndRegisterFace, registerFaceForExistingUser } from '../services/registrationService'
+import { detectVisibleFacePose, type FacePose } from '../../recognition/services/facePresenceDetector'
+import { createUserAndRegisterFace, registerMultiAngleFaceForExistingUser } from '../services/registrationService'
 import { checkFaceDataPhoto } from '../../../services/recognitionService'
 
 type Mode = 'EXISTENTE' | 'NUEVO'
+type ExistingRegistrationStep = 'credentials' | 'guide' | 'capture'
+type CaptureAngle = 'front' | 'left' | 'right'
 
-const FACE_CHECK_INTERVAL_MS = 1300
-const FACE_CAPTURE_FORMAT = 'jpeg'
-
-function fullName(user: User): string {
-  return `${user.name ?? ''} ${user.lastName ?? ''}`.trim() || user.username || `ID ${user.id}`
+type AngleCapture = {
+  key: CaptureAngle
+  label: string
+  instruction: string
 }
 
+const FACE_CHECK_INTERVAL_MS = 350
+const FACE_CAPTURE_FORMAT = 'jpeg'
+const FACE_CAPTURE_QUALITY = 1
+const ANGLE_CAPTURES: AngleCapture[] = [
+  {
+    key: 'front',
+    label: 'Frontal',
+    instruction: 'Mira directamente a la camara y manten el rostro centrado.',
+  },
+  {
+    key: 'left',
+    label: 'Izquierda',
+    instruction: 'Gira ligeramente el rostro hacia tu izquierda, sin salir del recuadro.',
+  },
+  {
+    key: 'right',
+    label: 'Derecha',
+    instruction: 'Gira ligeramente el rostro hacia tu derecha, sin salir del recuadro.',
+  },
+]
 function normalizeFaceRegistrationError(reason: string): string {
   if (/descriptor facial|no se pudo generar|no se detecto|no_face/i.test(reason)) {
     return 'No se detecto un rostro claro. Centra el rostro, mejora la luz e intenta nuevamente.'
@@ -35,13 +55,39 @@ function normalizeFaceRegistrationError(reason: string): string {
   return reason
 }
 
+function isExpectedPose(angle: CaptureAngle, pose: FacePose): boolean {
+  return angle === pose
+}
+
+function getCaptureGuidanceMessage(angle: CaptureAngle, pose: FacePose): string {
+  if (isExpectedPose(angle, pose)) {
+    return angle === 'front'
+      ? 'Rostro frontal detectado. Puedes capturar.'
+      : angle === 'left'
+        ? 'Giro izquierdo detectado. Puedes capturar.'
+        : 'Giro derecho detectado. Puedes capturar.'
+  }
+
+  if (angle === 'front') return 'Mira directamente a la camara para capturar frontal.'
+  if (angle === 'left') return 'Gira el rostro hacia tu izquierda para continuar.'
+  return 'Gira el rostro hacia tu derecha para continuar.'
+}
+
 export function AdminRegistration() {
   const newUserFormKey = useMemo(() => `new-user-${Date.now()}`, [])
   const checkingFaceRef = useRef(false)
+  const autoCapturingRef = useRef(false)
   const [mode, setMode] = useState<Mode>('EXISTENTE')
-  const [users, setUsers] = useState<User[]>([])
-  const [search, setSearch] = useState('')
-  const [selectedUser, setSelectedUser] = useState<User | null>(null)
+  const [existingStep, setExistingStep] = useState<ExistingRegistrationStep>('credentials')
+  const [existingUsername, setExistingUsername] = useState('')
+  const [existingPassword, setExistingPassword] = useState('')
+  const [currentAngle, setCurrentAngle] = useState<CaptureAngle>('front')
+  const [guidePreviewAngle, setGuidePreviewAngle] = useState<CaptureAngle>('front')
+  const [angleCaptures, setAngleCaptures] = useState<Record<CaptureAngle, Blob | null>>({
+    front: null,
+    left: null,
+    right: null,
+  })
 
   const [newName, setNewName] = useState('')
   const [newLastName, setNewLastName] = useState('')
@@ -53,7 +99,7 @@ export function AdminRegistration() {
   const [newPasswordConfirmation, setNewPasswordConfirmation] = useState('')
   const [newType, setNewType] = useState<UserType>('TECHNICIAN')
 
-  const { videoRef, stream, error: cameraError, start } = useCamera()
+  const { videoRef, stream, error: cameraError, start, stop } = useCamera()
 
   const [busy, setBusy] = useState(false)
   const [faceDetected, setFaceDetected] = useState(false)
@@ -63,16 +109,17 @@ export function AdminRegistration() {
   )
 
   useEffect(() => {
-    ;(async () => {
-      try {
-        setUsers(await getAllUsers())
-      } catch {
-        setAlert({ variant: 'error', message: 'No se pudo listar usuarios. Revisa el backend.' })
-      }
-    })()
-  }, [])
+    const shouldUseCamera = mode === 'NUEVO' || (mode === 'EXISTENTE' && existingStep === 'capture')
 
-  useEffect(() => {
+    if (!shouldUseCamera) {
+      stop()
+      setFaceDetected(false)
+      setCameraMessage('Camara apagada.')
+      return
+    }
+
+    if (stream) return
+
     ;(async () => {
       try {
         await start()
@@ -80,7 +127,21 @@ export function AdminRegistration() {
         // useCamera exposes the error message.
       }
     })()
-  }, [start])
+  }, [existingStep, mode, start, stop, stream])
+
+  useEffect(() => {
+    if (mode !== 'EXISTENTE' || existingStep !== 'guide') return
+
+    setGuidePreviewAngle('front')
+    const timer = window.setInterval(() => {
+      setGuidePreviewAngle((current) => {
+        const currentIndex = ANGLE_CAPTURES.findIndex((angle) => angle.key === current)
+        return ANGLE_CAPTURES[(currentIndex + 1) % ANGLE_CAPTURES.length].key
+      })
+    }, 2400)
+
+    return () => window.clearInterval(timer)
+  }, [existingStep, mode])
 
   useEffect(() => {
     if (!stream || busy) {
@@ -98,9 +159,9 @@ export function AdminRegistration() {
 
       checkingFaceRef.current = true
       try {
-        // Primero valida localmente que exista un rostro visible para no saturar el backend con fondos o frames vacios.
-        const hasLocalFace = await hasVisibleFace(video)
-        if (!hasLocalFace) {
+        // Primero valida localmente que exista un rostro visible y estima su orientacion.
+        const facePose = await detectVisibleFacePose(video)
+        if (!facePose.visible) {
           if (!cancelled) {
             setFaceDetected(false)
             setCameraMessage('Coloca tu rostro frente a la camara.')
@@ -108,19 +169,31 @@ export function AdminRegistration() {
           return
         }
 
-        const photo = await captureVideoFrameBlob(video, {
-          format: FACE_CAPTURE_FORMAT,
-          quality: 0.95,
-          enhanceLowLight: true,
-        })
-        const valid = await checkFaceDataPhoto(photo)
+        const poseMatches = existingStep === 'capture' && isExpectedPose(currentAngle, facePose.pose)
+        const shouldCaptureFrame = existingStep !== 'capture' || poseMatches
+        const photo = shouldCaptureFrame
+          ? await captureVideoFrameBlob(video, {
+              format: FACE_CAPTURE_FORMAT,
+              quality: FACE_CAPTURE_QUALITY,
+              enhanceLowLight: true,
+            })
+          : null
+        const valid = existingStep === 'capture' ? poseMatches : photo ? await checkFaceDataPhoto(photo) : false
         if (!cancelled) {
           setFaceDetected(valid)
+          const angleInstruction = ANGLE_CAPTURES.find((angle) => angle.key === currentAngle)?.instruction
           setCameraMessage(
-            valid
-              ? 'Rostro detectado. Ya puedes registrar.'
-              : 'Coloca tu rostro frente a la camara.',
+            existingStep === 'capture' && angleInstruction
+              ? valid
+                ? getCaptureGuidanceMessage(currentAngle, facePose.pose)
+                : angleInstruction
+              : valid
+                ? 'Rostro detectado. Ya puedes registrar.'
+                : 'Coloca tu rostro frente a la camara.',
           )
+          if (existingStep === 'capture' && valid && photo && !angleCaptures[currentAngle] && !autoCapturingRef.current) {
+            void completeAutoAngleCapture(photo, currentAngle)
+          }
         }
       } catch {
         if (!cancelled) {
@@ -141,57 +214,103 @@ export function AdminRegistration() {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [busy, stream, videoRef])
+  }, [angleCaptures, busy, currentAngle, existingStep, stream, videoRef])
 
-  const filteredUsers = useMemo(() => {
-    const query = search.trim().toLowerCase()
-    if (!query) return users
+  const capturedAnglesCount = ANGLE_CAPTURES.filter((angle) => angleCaptures[angle.key]).length
+  const guidePreviewConfig = ANGLE_CAPTURES.find((angle) => angle.key === guidePreviewAngle) ?? ANGLE_CAPTURES[0]
+  const autoCaptureProgress = Math.round((capturedAnglesCount / ANGLE_CAPTURES.length) * 100)
+  const progressDegrees = Math.round((autoCaptureProgress / 100) * 360)
 
-    return users.filter((user) => {
-      return [fullName(user), user.username, user.dni]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(query))
-    })
-  }, [search, users])
+  function resetExistingRegistration() {
+    setExistingStep('credentials')
+    setExistingUsername('')
+    setExistingPassword('')
+    setCurrentAngle('front')
+    setGuidePreviewAngle('front')
+    setAngleCaptures({ front: null, left: null, right: null })
+    stop()
+  }
 
-  async function registerExistingFace() {
+  function continueToGuide() {
     setAlert(null)
+    if (!existingUsername.trim() || !existingPassword) {
+      setAlert({ variant: 'warning', message: 'Ingresa usuario y contrasena para continuar.' })
+      return
+    }
+    setExistingStep('guide')
+  }
 
-    if (!selectedUser?.id) {
-      setAlert({ variant: 'warning', message: 'Selecciona un usuario existente primero.' })
+  function beginAngleCapture() {
+    setAlert(null)
+    setExistingStep('capture')
+    setCurrentAngle('front')
+    setAngleCaptures({ front: null, left: null, right: null })
+    autoCapturingRef.current = false
+    setCameraMessage('Activando camara...')
+  }
+
+  function cancelAutoCapture() {
+    autoCapturingRef.current = false
+    setAngleCaptures({ front: null, left: null, right: null })
+    setCurrentAngle('front')
+    setExistingStep('guide')
+    stop()
+  }
+
+  async function completeAutoAngleCapture(photo: Blob, angle: CaptureAngle) {
+    autoCapturingRef.current = true
+    setAlert(null)
+    setCameraMessage(`Capturando ${ANGLE_CAPTURES.find((item) => item.key === angle)?.label.toLowerCase() ?? 'rostro'}...`)
+
+    const nextCaptures = { ...angleCaptures, [angle]: photo }
+    setAngleCaptures(nextCaptures)
+
+    const currentIndex = ANGLE_CAPTURES.findIndex((item) => item.key === angle)
+    const nextAngle = ANGLE_CAPTURES[currentIndex + 1]
+
+    if (nextAngle) {
+      window.setTimeout(() => {
+        setCurrentAngle(nextAngle.key)
+        setCameraMessage(nextAngle.instruction)
+        autoCapturingRef.current = false
+      }, 650)
       return
     }
-    if (!stream) {
-      setAlert({ variant: 'error', message: 'La camara no esta activa. Revisa permisos.' })
+
+    try {
+      await registerExistingMultiAngleFace(nextCaptures)
+    } finally {
+      autoCapturingRef.current = false
+    }
+  }
+
+  async function registerExistingMultiAngleFace(captures: Record<CaptureAngle, Blob | null> = angleCaptures) {
+    setAlert(null)
+    if (!existingUsername.trim() || !existingPassword) {
+      setAlert({ variant: 'warning', message: 'Ingresa usuario y contrasena para registrar.' })
       return
     }
-    if (!faceDetected) {
-      setAlert({ variant: 'warning', message: 'Primero ubica un rostro claro frente a la camara.' })
+    if (!captures.front || !captures.left || !captures.right) {
+      setAlert({ variant: 'warning', message: 'Completa las capturas frontal, izquierda y derecha.' })
       return
     }
 
     setBusy(true)
-    setCameraMessage('Capturando rostro y validando con el backend...')
+    setCameraMessage('Registrando rostro en tres angulos...')
     try {
-      const video = videoRef.current
-      if (!video || video.readyState < 2) throw new Error('video_not_ready')
-
-      const photo = await captureVideoFrameBlob(video, {
-        format: FACE_CAPTURE_FORMAT,
-        quality: 0.95,
-        enhanceLowLight: true,
+      await registerMultiAngleFaceForExistingUser(existingUsername.trim(), existingPassword, {
+        front: captures.front,
+        left: captures.left,
+        right: captures.right,
       })
-      await registerFaceForExistingUser(selectedUser.id, photo)
+      setAlert({ variant: 'success', message: 'Rostro registrado correctamente en tres angulos.' })
       setCameraMessage('Rostro registrado correctamente.')
-      setAlert({ variant: 'success', message: `Rostro registrado para: ${fullName(selectedUser)}` })
+      resetExistingRegistration()
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'No se pudo registrar rostro.'
       const message = normalizeFaceRegistrationError(reason)
-      setCameraMessage('No se pudo validar el rostro. Ajusta posicion y vuelve a intentar.')
-      setAlert({
-        variant: message === reason ? 'error' : 'warning',
-        message,
-      })
+      setAlert({ variant: message === reason ? 'error' : 'warning', message })
+      setCameraMessage('No se pudo completar el registro facial.')
     } finally {
       setBusy(false)
     }
@@ -221,7 +340,7 @@ export function AdminRegistration() {
 
       const photo = await captureVideoFrameBlob(video, {
         format: FACE_CAPTURE_FORMAT,
-        quality: 0.95,
+        quality: FACE_CAPTURE_QUALITY,
         enhanceLowLight: true,
       })
       const created = await createUserAndRegisterFace(
@@ -265,6 +384,19 @@ export function AdminRegistration() {
     }
   }
 
+  const showGuideCameraPanel = mode === 'EXISTENTE' && existingStep === 'guide'
+  const showLiveCameraPanel = mode === 'NUEVO' || (mode === 'EXISTENTE' && existingStep === 'capture')
+  const guideFaceTransform =
+    guidePreviewAngle === 'front'
+      ? 'translateX(0) rotateY(0deg)'
+      : guidePreviewAngle === 'left'
+        ? 'translateX(-24px) rotateY(-36deg)'
+        : 'translateX(24px) rotateY(36deg)'
+  const guideArrowText =
+    guidePreviewAngle === 'front' ? 'Mira al frente' : guidePreviewAngle === 'left' ? 'Gira a tu izquierda' : 'Gira a tu derecha'
+  const captureActionText =
+    currentAngle === 'front' ? 'Mira al frente' : currentAngle === 'left' ? 'Gira a tu izquierda' : 'Gira a tu derecha'
+
   return (
     <div className="space-y-6">
       <style>
@@ -272,6 +404,10 @@ export function AdminRegistration() {
           @keyframes registrationScan {
             0% { top: 18%; opacity: 0.38; }
             100% { top: 82%; opacity: 0.86; }
+          }
+          @keyframes faceGuideArrow {
+            0%, 100% { transform: translateX(0); opacity: 0.45; }
+            50% { transform: translateX(12px); opacity: 1; }
           }
         `}
       </style>
@@ -300,20 +436,65 @@ export function AdminRegistration() {
       <div className="grid gap-6 lg:grid-cols-12">
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:col-span-5">
           <div className="text-[11px] font-bold tracking-widest text-brand-blue/80">VALIDACION BIOMETRICA</div>
-          <div className="relative mt-3 overflow-hidden rounded-xl bg-black ring-1 ring-black/10">
-            <video ref={videoRef} className="aspect-[4/3] w-full object-cover" playsInline muted autoPlay />
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden="true">
-              <div className={['relative h-[72%] w-[56%] rounded-[2rem] border shadow-[0_0_24px_rgba(56,189,248,0.18)]', faceDetected ? 'border-emerald-300/75' : 'border-sky-300/55'].join(' ')}>
-                <div
-                  className={['absolute left-4 right-4 top-1/2 h-px shadow-[0_0_14px_rgba(125,211,252,0.45)]', faceDetected ? 'bg-emerald-200/85' : 'bg-sky-200/80'].join(' ')}
-                  style={{ animation: 'registrationScan 1.8s ease-in-out infinite alternate' }}
-                />
-                <div className="absolute left-3 top-3 h-8 w-8 rounded-tl-2xl border-l-2 border-t-2 border-sky-200/80" />
-                <div className="absolute right-3 top-3 h-8 w-8 rounded-tr-2xl border-r-2 border-t-2 border-sky-200/80" />
-                <div className="absolute bottom-3 left-3 h-8 w-8 rounded-bl-2xl border-b-2 border-l-2 border-sky-200/80" />
-                <div className="absolute bottom-3 right-3 h-8 w-8 rounded-br-2xl border-b-2 border-r-2 border-sky-200/80" />
+          <div className="relative mt-3 aspect-[4/3] overflow-hidden rounded-xl bg-slate-950 ring-1 ring-black/10">
+            {showLiveCameraPanel && (
+              <video ref={videoRef} className="h-full w-full object-cover" playsInline muted autoPlay />
+            )}
+
+            {showGuideCameraPanel && (
+              <div className="absolute inset-0 bg-white">
+                <div className="absolute inset-0 flex flex-col items-center justify-center px-5 text-center">
+                  <div className="relative flex h-[72%] w-[72%] max-w-[320px] items-center justify-center">
+                    <div className="absolute left-0 top-0 h-12 w-12 rounded-tl-2xl border-l-[6px] border-t-[6px] border-brand-blue" />
+                    <div className="absolute right-0 top-0 h-12 w-12 rounded-tr-2xl border-r-[6px] border-t-[6px] border-brand-blue" />
+                    <div className="absolute bottom-0 left-0 h-12 w-12 rounded-bl-2xl border-b-[6px] border-l-[6px] border-brand-blue" />
+                    <div className="absolute bottom-0 right-0 h-12 w-12 rounded-br-2xl border-b-[6px] border-r-[6px] border-brand-blue" />
+
+                    <div className="relative h-full w-full [perspective:900px]">
+                      <img
+                        src="/face-registration-guide.png"
+                        alt=""
+                        className="mx-auto h-full w-full object-contain transition-transform duration-500"
+                        style={{ transform: guideFaceTransform }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="absolute bottom-4 left-4 right-4 rounded-lg bg-slate-950/80 px-3 py-3 text-white shadow-lg">
+                    <div className="text-sm font-black">{guideArrowText}</div>
+                    <div className="mt-1 text-xs text-white/80">{guidePreviewConfig.instruction}</div>
+                    {guidePreviewAngle !== 'front' && (
+                      <div
+                        className={['mx-auto mt-2 h-1.5 w-14 rounded-full bg-white', guidePreviewAngle === 'left' ? '-scale-x-100' : ''].join(' ')}
+                        style={{ animation: 'faceGuideArrow 1.1s ease-in-out infinite' }}
+                      />
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
+
+            {!showGuideCameraPanel && !showLiveCameraPanel && (
+              <div className="absolute inset-0 flex items-center justify-center bg-slate-950 text-sm font-semibold text-white/80">
+                Camara apagada
+              </div>
+            )}
+
+            {showLiveCameraPanel && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden="true">
+                <div className={['relative h-[72%] w-[56%] rounded-[2rem] border shadow-[0_0_24px_rgba(56,189,248,0.18)]', faceDetected ? 'border-emerald-300/75' : 'border-sky-300/55'].join(' ')}>
+                  <div
+                    className={['absolute left-4 right-4 top-1/2 h-px shadow-[0_0_14px_rgba(125,211,252,0.45)]', faceDetected ? 'bg-emerald-200/85' : 'bg-sky-200/80'].join(' ')}
+                    style={{ animation: 'registrationScan 1.8s ease-in-out infinite alternate' }}
+                  />
+                  <div className="absolute left-3 top-3 h-8 w-8 rounded-tl-2xl border-l-2 border-t-2 border-sky-200/80" />
+                  <div className="absolute right-3 top-3 h-8 w-8 rounded-tr-2xl border-r-2 border-t-2 border-sky-200/80" />
+                  <div className="absolute bottom-3 left-3 h-8 w-8 rounded-bl-2xl border-b-2 border-l-2 border-sky-200/80" />
+                  <div className="absolute bottom-3 right-3 h-8 w-8 rounded-br-2xl border-b-2 border-r-2 border-sky-200/80" />
+                </div>
+              </div>
+            )}
+
             {busy && (
               <div className="absolute bottom-3 left-3 right-3 rounded-lg bg-slate-950/70 px-3 py-2 text-center text-xs font-semibold text-white backdrop-blur-sm">
                 Validando rostro...
@@ -324,10 +505,12 @@ export function AdminRegistration() {
           <div className="mt-3">
             {cameraError ? (
               <Alert variant="error" message={cameraError} />
+            ) : showGuideCameraPanel ? (
+              <Alert variant="info" message={existingStep === 'guide' ? 'Guia visual. La camara sigue apagada.' : 'Camara apagada. Ingresa credenciales para continuar.'} />
             ) : stream ? (
               <Alert variant="info" message={cameraMessage} />
             ) : (
-              <Alert variant="info" message="Activando camara..." />
+              <Alert variant="info" message={showLiveCameraPanel ? 'Activando camara...' : 'Camara apagada.'} />
             )}
           </div>
         </section>
@@ -335,60 +518,125 @@ export function AdminRegistration() {
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:col-span-7">
           {mode === 'EXISTENTE' ? (
             <div className="space-y-4">
-              <div className="text-[11px] font-bold tracking-widest text-brand-blue/80">USUARIO EXISTENTE</div>
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Buscar por nombre, usuario o DNI"
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-blue/20"
-              />
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="max-h-64 overflow-auto rounded-xl border border-slate-200">
-                  {filteredUsers.map((user) => (
-                    <button
-                      key={user.id}
-                      type="button"
-                      onClick={() => setSelectedUser(user)}
-                      className={[
-                        'flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50',
-                        selectedUser?.id === user.id ? 'bg-slate-100' : '',
-                      ].join(' ')}
-                    >
-                      <span className="font-medium">{fullName(user)}</span>
-                      <span className="text-xs text-slate-500">{formatUserRole(user.type)}</span>
-                    </button>
-                  ))}
-                  {filteredUsers.length === 0 && <div className="px-3 py-3 text-sm text-slate-500">Sin resultados</div>}
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[11px] font-bold tracking-widest text-brand-blue/80">USUARIO EXISTENTE</div>
+                  <h3 className="mt-1 text-lg font-bold text-slate-950">Registro facial guiado</h3>
                 </div>
-
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
-                  {selectedUser ? (
-                    <div className="space-y-1">
-                      <div><span className="font-semibold">ID:</span> {selectedUser.id}</div>
-                      <div><span className="font-semibold">Nombre:</span> {fullName(selectedUser)}</div>
-                      <div><span className="font-semibold">Usuario:</span> {selectedUser.username ?? '-'}</div>
-                      <div><span className="font-semibold">DNI:</span> {selectedUser.dni ?? '-'}</div>
-                      <div><span className="font-semibold">Correo:</span> {selectedUser.email ?? '-'}</div>
-                      <div><span className="font-semibold">Telefono:</span> {selectedUser.phone ?? '-'}</div>
-                      <div><span className="font-semibold">Rol:</span> {formatUserRole(selectedUser.type)}</div>
-                    </div>
-                  ) : (
-                    <div className="text-slate-600">Selecciona un usuario para ver sus datos.</div>
-                  )}
+                <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                  {capturedAnglesCount}/3 capturas
                 </div>
               </div>
 
-              <LoadingButton
-                type="button"
-                loading={busy}
-                loadingText="Registrando..."
-                disabled={!faceDetected}
-                onClick={() => void registerExistingFace()}
-                className="w-full"
-              >
-                {faceDetected ? 'Registrar rostro' : 'Esperando rostro'}
-              </LoadingButton>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {(['credentials', 'guide', 'capture'] as ExistingRegistrationStep[]).map((step, index) => (
+                  <div
+                    key={step}
+                    className={[
+                      'rounded-lg border px-3 py-2 text-xs font-semibold',
+                      existingStep === step
+                        ? 'border-brand-blue bg-brand-blue/10 text-brand-blue'
+                        : 'border-slate-200 bg-slate-50 text-slate-500',
+                    ].join(' ')}
+                  >
+                    {index + 1}. {step === 'credentials' ? 'Identidad' : step === 'guide' ? 'Guia' : 'Capturas'}
+                  </div>
+                ))}
+              </div>
+
+              {existingStep === 'credentials' && (
+                <div className="space-y-4">
+                  <p className="text-sm leading-6 text-slate-600">
+                    Ingresa el usuario y contrasena del colaborador antes de iniciar el registro facial.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="text-sm font-medium">Usuario</span>
+                      <input
+                        value={existingUsername}
+                        onChange={(event) => setExistingUsername(event.target.value)}
+                        className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-blue/20"
+                        autoComplete="username"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-sm font-medium">Contrasena</span>
+                      <input
+                        value={existingPassword}
+                        onChange={(event) => setExistingPassword(event.target.value)}
+                        className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-blue/20"
+                        type="password"
+                        autoComplete="current-password"
+                      />
+                    </label>
+                  </div>
+                  <LoadingButton type="button" onClick={continueToGuide} className="w-full">
+                    Continuar
+                  </LoadingButton>
+                </div>
+              )}
+
+              {existingStep === 'guide' && (
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <LoadingButton type="button" variant="dark" onClick={() => setExistingStep('credentials')}>
+                      Volver
+                    </LoadingButton>
+                    <LoadingButton type="button" onClick={beginAngleCapture}>
+                      Iniciar registro
+                    </LoadingButton>
+                  </div>
+                </div>
+              )}
+
+              {existingStep === 'capture' && (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
+                    <div className="flex flex-col items-center gap-4 text-center">
+                      <div
+                        className="flex h-28 w-28 items-center justify-center rounded-full"
+                        style={{
+                          background: `conic-gradient(#0f3d73 ${progressDegrees}deg, #e2e8f0 ${progressDegrees}deg)`,
+                        }}
+                      >
+                        <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white text-xl font-black text-brand-blue">
+                          {autoCaptureProgress}%
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-base font-bold text-slate-950">{captureActionText}</div>
+                        <p className="mt-2 text-sm leading-6 text-slate-600">{cameraMessage}</p>
+                      </div>
+
+                      <div className="flex w-full flex-wrap justify-center gap-2">
+                        {ANGLE_CAPTURES.map((angle) => (
+                          <span
+                            key={angle.key}
+                            className={[
+                              'rounded-full px-3 py-1 text-xs font-semibold',
+                              angleCaptures[angle.key]
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : currentAngle === angle.key
+                                  ? 'bg-brand-blue/10 text-brand-blue'
+                                  : 'bg-slate-200 text-slate-500',
+                            ].join(' ')}
+                          >
+                            {angleCaptures[angle.key] ? 'Listo ' : ''}{angle.label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3">
+                    <LoadingButton type="button" variant="dark" onClick={cancelAutoCapture} disabled={busy}>
+                      Cancelar
+                    </LoadingButton>
+                  </div>
+                </div>
+              )}
+
             </div>
           ) : (
             <form className="space-y-4" autoComplete="off" onSubmit={(event) => event.preventDefault()}>
