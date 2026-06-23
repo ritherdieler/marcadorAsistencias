@@ -5,7 +5,7 @@ Vite 8 mostraba `ready` al instante, pero la primera petición HTTP quedaba bloq
 
 ## Solución
 - `scripts/ensure-deps.sh` valida dependencias críticas (incluye `tailwindcss/lib/index.js`), reinstala si están corruptas y libera el puerto 5173.
-- Se ejecuta automáticamente con `prebuild`, `prepreview` y al usar `npm run dev`.
+- Se ejecuta automáticamente con `prebuild` y `prepreview`. Para desarrollo, ejecuta manualmente `npm run ensure-deps` si hay problemas con dependencias.
 - `optimizeDeps.exclude` mantiene fuera ONNX y MediaPipe del pre-bundling.
 
 ## Error PostCSS / tailwindcss

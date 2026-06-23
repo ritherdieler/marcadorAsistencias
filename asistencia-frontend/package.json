@@ -7,7 +7,7 @@
     "clean": "rm -rf node_modules/.vite dist",
     "clean:all": "rm -rf node_modules/.vite dist node_modules && npm install",
     "ensure-deps": "bash scripts/ensure-deps.sh",
-    "dev": "bash scripts/dev.sh",
+    "dev": "vite",
     "prebuild": "ENSURE_VITE_CACHE=0 bash scripts/ensure-deps.sh",
     "dev:fresh": "npm run clean:all && bash scripts/ensure-deps.sh",
     "build": "tsc && vite build",
