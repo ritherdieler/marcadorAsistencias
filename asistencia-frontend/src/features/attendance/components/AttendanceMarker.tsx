@@ -15,7 +15,9 @@ import { identifyFacePhoto, saveFaceEvidencePhoto, verifyAttendanceWithPassword,
 import type { User } from '../../../types/user'
 import { formatUserRole } from '../../../utils/userRole'
 import { captureFacePhoto } from '../../recognition/services/cameraEvidence'
+import { FaceBoxOverlay } from '../../recognition/components/FaceBoxOverlay'
 import { detectVisibleFacePose, type FaceBox } from '../../recognition/services/facePresenceDetector'
+import { evaluateFaceAlignment, faceAlignmentMessage, type FaceAlignment } from '../../recognition/services/faceAlignment'
 
 type AttendanceResult = {
   title: string
@@ -67,6 +69,8 @@ export function AttendanceMarker() {
   const faceMissingSinceRef = useRef<number | null>(null)
   const identityConfirmedAtRef = useRef<number | null>(null)
   const [status, setStatus] = useState('Camara apagada')
+  const [faceBox, setFaceBox] = useState<FaceBox | null>(null)
+  const [alignment, setAlignment] = useState<FaceAlignment>('searching')
   const [message, setMessage] = useState<string | null>(null)
   const [messageType, setMessageType] = useState<'info' | 'error'>('info')
   const [identified, setIdentified] = useState<IdentifiedPerson | null>(null)
@@ -110,6 +114,8 @@ export function AttendanceMarker() {
     setCameraEnabled(false)
     setCameraReady(false)
     clearCurrentIdentity()
+    setFaceBox(null)
+    setAlignment('searching')
     setMessage(null)
     setStatus('Camara apagada')
 
@@ -294,6 +300,8 @@ export function AttendanceMarker() {
 
       const faceState = await detectVisibleFacePose(video)
       if (!faceState.visible) {
+        setFaceBox(null)
+        setAlignment('searching')
         const now = Date.now()
         faceMissingSinceRef.current ??= now
         if (now - faceMissingSinceRef.current >= FACE_LOST_CLEAR_MS) {
@@ -304,6 +312,19 @@ export function AttendanceMarker() {
       }
 
       faceMissingSinceRef.current = null
+      setFaceBox(faceState.box ?? null)
+
+      const faceAlignment = faceState.box
+        ? evaluateFaceAlignment(faceState.box, faceState.pose, null)
+        : 'aligned'
+      setAlignment(faceState.box ? faceAlignment : 'searching')
+
+      // Solo identifica cuando el rostro esta bien encuadrado; guia al usuario y mejora la captura.
+      if (faceState.box && faceAlignment !== 'aligned') {
+        setMessage(null)
+        return
+      }
+
       if (didFaceChangeSignificantly(lastFaceBoxRef.current, faceState.box)) {
         clearCurrentIdentity()
         return
@@ -689,7 +710,11 @@ export function AttendanceMarker() {
         : showSyncMessage
           ? 'Sincronizando marcaciones pendientes...'
           : showWaitingFaceMessage
-              ? 'Coloca tu rostro frente a la camara'
+              ? alignment === 'searching'
+                ? 'Coloca tu rostro frente a la camara'
+                : alignment === 'aligned'
+                  ? 'Manten la posicion, identificando...'
+                  : faceAlignmentMessage(alignment)
               : status
 
   return (
@@ -868,15 +893,7 @@ export function AttendanceMarker() {
 
       <div className="relative overflow-hidden rounded-xl bg-black ring-1 ring-black/10">
         <video ref={videoRef} className="aspect-video w-full object-cover" playsInline muted autoPlay />
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden="true">
-          <div className="relative h-[72%] w-[54%] max-w-sm rounded-[2rem] border border-sky-300/55 shadow-[0_0_24px_rgba(56,189,248,0.18)]">
-            <div className="absolute left-4 right-4 top-1/2 h-px bg-sky-200/80 shadow-[0_0_14px_rgba(125,211,252,0.45)] animate-pulse" />
-            <div className="absolute left-3 top-3 h-8 w-8 rounded-tl-2xl border-l-2 border-t-2 border-sky-200/80" />
-            <div className="absolute right-3 top-3 h-8 w-8 rounded-tr-2xl border-r-2 border-t-2 border-sky-200/80" />
-            <div className="absolute bottom-3 left-3 h-8 w-8 rounded-bl-2xl border-b-2 border-l-2 border-sky-200/80" />
-            <div className="absolute bottom-3 right-3 h-8 w-8 rounded-br-2xl border-b-2 border-r-2 border-sky-200/80" />
-          </div>
-        </div>
+        {cameraEnabled && cameraReady && <FaceBoxOverlay box={faceBox} alignment={alignment} />}
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800">

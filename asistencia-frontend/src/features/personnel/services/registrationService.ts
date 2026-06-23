@@ -94,3 +94,37 @@ export async function createUserAndRegisterFace(
   await saveFaceDataPhoto(created.id, photo)
   return created
 }
+
+export async function createUserAndRegisterMultiAngleFace(
+  userData: NewUserRegistrationData,
+  photos: { front: Blob; left: Blob; right: Blob },
+): Promise<User> {
+  const nameError = validatePersonName(userData.name, 'Nombre')
+  if (nameError) throw new Error(nameError)
+
+  const lastNameError = validatePersonLastNameOptional(userData.lastName ?? '')
+  if (lastNameError) throw new Error(lastNameError)
+
+  const usernameError = validateUsername(userData.username)
+  if (usernameError) throw new Error(usernameError)
+
+  const passwordError = validatePassword(userData.password)
+  if (passwordError) throw new Error(passwordError)
+
+  const passwordConfirmationError = validatePasswordConfirmation(userData.password, userData.passwordConfirmation)
+  if (passwordConfirmationError) throw new Error(passwordConfirmationError)
+
+  const dniError = validateDniOptional(userData.dni ?? '')
+  if (dniError) throw new Error(dniError)
+
+  const emailError = validateEmailRequired(userData.email ?? '')
+  if (emailError) throw new Error(emailError)
+
+  const phoneError = validatePhoneRequired(userData.phone ?? '')
+  if (phoneError) throw new Error(phoneError)
+
+  const { passwordConfirmation: _passwordConfirmation, ...payload } = userData
+  const created = await createUser(payload)
+  await registerMultiAngleFaceForExistingUser(userData.username.trim(), userData.password, photos)
+  return created
+}
