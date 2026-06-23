@@ -1,7 +1,5 @@
-import {
-  FACE_ALIGNMENT_TARGET_WIDTH_PERCENT,
-  type FaceAlignment,
-} from '../services/faceAlignment'
+import type { FaceAlignment } from '../services/faceAlignment'
+import { DEFAULT_FACE_COVERAGE_CONFIG } from '../services/faceAlignmentConfig'
 
 type FaceCoverageIndicatorProps = {
   widthPercent: number
@@ -12,7 +10,7 @@ type FaceCoverageIndicatorProps = {
 export function FaceCoverageIndicator({
   widthPercent,
   alignment,
-  targetPercent = FACE_ALIGNMENT_TARGET_WIDTH_PERCENT,
+  targetPercent = DEFAULT_FACE_COVERAGE_CONFIG.registration.targetWidthPercent,
 }: FaceCoverageIndicatorProps) {
   const barWidth = Math.min(100, widthPercent)
   const reachedTarget = widthPercent >= targetPercent

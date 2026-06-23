@@ -22,6 +22,7 @@ type CameraStageProps = {
   onRetry: () => void
   devices: MediaDeviceInfo[]
   deviceId: string | null
+  targetWidthPercent?: number
   onSelectDevice: (id: string) => void
 }
 
@@ -45,6 +46,7 @@ export function CameraStage({
   onRetry,
   devices,
   deviceId,
+  targetWidthPercent,
   onSelectDevice,
 }: CameraStageProps) {
   const showVideo = active && !permissionDenied
@@ -67,7 +69,11 @@ export function CameraStage({
 
         {showVideo && <FaceBoxOverlay box={faceBox} alignment={alignment} mirror={mirror} />}
         {showVideo && (
-          <FaceCoverageIndicator widthPercent={getFaceWidthPercent(faceBox)} alignment={alignment} />
+          <FaceCoverageIndicator
+            widthPercent={getFaceWidthPercent(faceBox)}
+            alignment={alignment}
+            targetPercent={targetWidthPercent}
+          />
         )}
         {showVideo && <CaptureCountdown value={countdown} />}
 

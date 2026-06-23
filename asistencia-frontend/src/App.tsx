@@ -8,6 +8,7 @@ import { RequireAdmin } from './features/auth/components/RequireAdmin'
 import { LoginPage } from './features/auth/pages/LoginPage'
 import { AdminHomePage } from './features/dashboard/pages/AdminHomePage'
 import { AdminRegisterPage } from './features/personnel/pages/AdminRegisterPage'
+import { AdminFaceCoveragePage } from './features/settings/pages/AdminFaceCoveragePage'
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="dashboard" element={<AdminHomePage />} />
         <Route path="registro" element={<AdminRegisterPage />} />
         <Route path="asistencias" element={<AdminAttendancePage />} />
+        <Route path="configuracion-facial" element={<AdminFaceCoveragePage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/terminal" replace />} />

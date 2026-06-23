@@ -4,6 +4,7 @@ import { useCamera } from '../../../hooks/useCamera'
 import { captureFacePhoto } from '../../recognition/services/cameraEvidence'
 import { detectVisibleFacePose, type FaceBox } from '../../recognition/services/facePresenceDetector'
 import { evaluateFaceAlignment, faceAlignmentMessage, getFaceWidthPercent, type FaceAlignment } from '../../recognition/services/faceAlignment'
+import { useFaceCoverageConfig } from '../../recognition/hooks/useFaceCoverageConfig'
 
 export type CaptureAngle = 'front' | 'left' | 'right'
 
@@ -43,6 +44,8 @@ interface UseFaceEnrollmentOptions {
 }
 
 export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOptions) {
+  const { getRuntimeConfig } = useFaceCoverageConfig()
+  const alignmentConfig = getRuntimeConfig('registration')
   const { videoRef, stream, error: cameraError, permissionDenied, start, stop } = useCamera()
 
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
@@ -169,17 +172,22 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
 
         setFaceBox(result.box)
         const angle = currentAngleRef.current
-        const quality = evaluateFaceAlignment(result.box, result.pose, angle)
+        const quality = evaluateFaceAlignment(result.box, result.pose, angle, alignmentConfig)
         setAlignment(quality)
 
         if (quality !== 'aligned') {
           alignedSinceRef.current = null
           setCountdown(null)
           setStatusMessage(
-            faceAlignmentMessage(quality, {
-              widthPercent: getFaceWidthPercent(result.box),
-              poseInstruction: angleInstruction(angle),
-            }),
+            faceAlignmentMessage(
+              quality,
+              {
+                widthPercent: getFaceWidthPercent(result.box),
+                targetPercent: alignmentConfig.targetWidthPercent,
+                poseInstruction: angleInstruction(angle),
+              },
+              alignmentConfig.targetWidthPercent,
+            ),
           )
           return
         }
@@ -187,7 +195,14 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
         if (!autoCaptureRef.current) {
           setCountdown(null)
           setStatusMessage(
-            faceAlignmentMessage('aligned', { widthPercent: getFaceWidthPercent(result.box) }),
+            faceAlignmentMessage(
+              'aligned',
+              {
+                widthPercent: getFaceWidthPercent(result.box),
+                targetPercent: alignmentConfig.targetWidthPercent,
+              },
+              alignmentConfig.targetWidthPercent,
+            ),
           )
           return
         }
@@ -222,7 +237,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [active, stream, doCapture, videoRef])
+  }, [active, alignmentConfig, stream, doCapture, videoRef])
 
   useEffect(() => releasePreviews, [releasePreviews])
 
@@ -304,6 +319,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
     capturedCount,
     isComplete,
     canManualCapture,
+    targetWidthPercent: alignmentConfig.targetWidthPercent,
     selectDevice,
     retryCamera,
     manualCapture,

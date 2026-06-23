@@ -290,6 +290,7 @@ export function AdminRegistration() {
                   onRetry={enroll.retryCamera}
                   devices={enroll.devices}
                   deviceId={enroll.deviceId}
+                  targetWidthPercent={enroll.targetWidthPercent}
                   onSelectDevice={enroll.selectDevice}
                 />
               )}

@@ -1,3 +1,5 @@
+import type { FaceAlignmentRuntimeConfig } from './faceAlignmentConfig'
+import { DEFAULT_FACE_COVERAGE_CONFIG, toRuntimeConfig } from './faceAlignmentConfig'
 import type { FaceBox, FacePose } from './facePresenceDetector'
 
 export type FaceAlignment =
@@ -8,21 +10,13 @@ export type FaceAlignment =
   | 'wrong_pose'
   | 'aligned'
 
-export const FACE_ALIGNMENT_TARGET_WIDTH_PERCENT = 30
-
-export const FACE_ALIGNMENT = {
-  minFaceWidth: 0.3,
-  maxFaceWidth: 0.75,
-  centerToleranceFront: 0.16,
-  centerToleranceTurn: 0.3,
-  centerTargetY: 0.46,
-} as const
-
 export type FaceAlignmentMessageOptions = {
   widthPercent?: number
   targetPercent?: number
   poseInstruction?: string
 }
+
+export const DEFAULT_REGISTRATION_RUNTIME_CONFIG = toRuntimeConfig('registration', DEFAULT_FACE_COVERAGE_CONFIG)
 
 export function getFaceWidthPercent(box: FaceBox | null): number {
   return box ? Math.round(box.width * 100) : 0
@@ -32,35 +26,35 @@ export function evaluateFaceAlignment(
   box: FaceBox,
   pose: FacePose,
   expectedPose: FacePose | null,
+  config: FaceAlignmentRuntimeConfig,
 ): FaceAlignment {
-  if (box.width < FACE_ALIGNMENT.minFaceWidth) return 'too_far'
-  if (box.width > FACE_ALIGNMENT.maxFaceWidth) return 'too_close'
+  if (box.width < config.minFaceWidth) return 'too_far'
+  if (box.width > config.maxFaceWidth) return 'too_close'
 
   const tolerance =
-    expectedPose && expectedPose !== 'front'
-      ? FACE_ALIGNMENT.centerToleranceTurn
-      : FACE_ALIGNMENT.centerToleranceFront
+    expectedPose && expectedPose !== 'front' ? config.centerToleranceTurn : config.centerToleranceFront
   const offCenterX = Math.abs(box.centerX - 0.5) > tolerance
-  const offCenterY = Math.abs(box.centerY - FACE_ALIGNMENT.centerTargetY) > tolerance + 0.06
+  const offCenterY = Math.abs(box.centerY - config.centerTargetY) > tolerance + 0.06
   if (offCenterX || offCenterY) return 'off_center'
 
   if (expectedPose && pose !== expectedPose) return 'wrong_pose'
   return 'aligned'
 }
 
-function widthPrefix(options: FaceAlignmentMessageOptions): string {
+function widthPrefix(options: FaceAlignmentMessageOptions, fallbackTarget: number): string {
   if (options.widthPercent === undefined) return ''
-  const target = options.targetPercent ?? FACE_ALIGNMENT_TARGET_WIDTH_PERCENT
+  const target = options.targetPercent ?? fallbackTarget
   return `Rostro al ${options.widthPercent}% de ancho. Objetivo: ${target}%. `
 }
 
 export function faceAlignmentMessage(
   alignment: FaceAlignment,
   options?: FaceAlignmentMessageOptions | string,
+  fallbackTarget = DEFAULT_REGISTRATION_RUNTIME_CONFIG.targetWidthPercent,
 ): string {
   const opts: FaceAlignmentMessageOptions =
     typeof options === 'string' ? { poseInstruction: options } : (options ?? {})
-  const prefix = widthPrefix(opts)
+  const prefix = widthPrefix(opts, fallbackTarget)
 
   switch (alignment) {
     case 'too_far':

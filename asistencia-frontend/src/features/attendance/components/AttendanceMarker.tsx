@@ -24,6 +24,7 @@ import {
   getFaceWidthPercent,
   type FaceAlignment,
 } from '../../recognition/services/faceAlignment'
+import { useFaceCoverageConfig } from '../../recognition/hooks/useFaceCoverageConfig'
 
 type AttendanceResult = {
   title: string
@@ -64,6 +65,8 @@ function didFaceChangeSignificantly(previous: FaceBox | null, current?: FaceBox)
 }
 
 export function AttendanceMarker() {
+  const { getRuntimeConfig } = useFaceCoverageConfig()
+  const alignmentConfig = getRuntimeConfig('attendance')
   const { videoRef, start, stop, stream, error: cameraError } = useCamera()
 
   const [cameraReady, setCameraReady] = useState(false)
@@ -321,7 +324,7 @@ export function AttendanceMarker() {
       setFaceBox(faceState.box ?? null)
 
       const faceAlignment = faceState.box
-        ? evaluateFaceAlignment(faceState.box, faceState.pose, null)
+        ? evaluateFaceAlignment(faceState.box, faceState.pose, null, alignmentConfig)
         : 'aligned'
       setAlignment(faceState.box ? faceAlignment : 'searching')
 
@@ -416,7 +419,7 @@ export function AttendanceMarker() {
       setIdentifying(false)
       setProcessingFace(false)
     }
-  }, [cameraEnabled, cameraReady, clearCurrentIdentity, confirming, identified, identifyOfflineFace, identifying, result, stream, unrecognizedDialog, videoRef])
+  }, [alignmentConfig, cameraEnabled, cameraReady, clearCurrentIdentity, confirming, identified, identifyOfflineFace, identifying, result, stream, unrecognizedDialog, videoRef])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -720,7 +723,14 @@ export function AttendanceMarker() {
                 ? 'Coloca tu rostro frente a la camara'
                 : alignment === 'aligned'
                   ? `Rostro al ${getFaceWidthPercent(faceBox)}% de ancho. Manten la posicion, identificando...`
-                  : faceAlignmentMessage(alignment, { widthPercent: getFaceWidthPercent(faceBox) })
+                  : faceAlignmentMessage(
+                      alignment,
+                      {
+                        widthPercent: getFaceWidthPercent(faceBox),
+                        targetPercent: alignmentConfig.targetWidthPercent,
+                      },
+                      alignmentConfig.targetWidthPercent,
+                    )
               : status
 
   return (
@@ -901,7 +911,11 @@ export function AttendanceMarker() {
         <video ref={videoRef} className="aspect-video w-full object-cover" playsInline muted autoPlay />
         {cameraEnabled && cameraReady && <FaceBoxOverlay box={faceBox} alignment={alignment} />}
         {cameraEnabled && cameraReady && (
-          <FaceCoverageIndicator widthPercent={getFaceWidthPercent(faceBox)} alignment={alignment} />
+          <FaceCoverageIndicator
+            widthPercent={getFaceWidthPercent(faceBox)}
+            alignment={alignment}
+            targetPercent={alignmentConfig.targetWidthPercent}
+          />
         )}
       </div>
 
