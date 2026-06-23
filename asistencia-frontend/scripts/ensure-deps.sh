@@ -7,7 +7,7 @@ cd "$ROOT"
 CRITICAL_FILES=(
   "node_modules/vite/bin/vite.js"
   "node_modules/sucrase/dist/index.js"
-  "node_modules/tailwindcss/package.json"
+  "node_modules/tailwindcss/lib/index.js"
   "node_modules/postcss/package.json"
   "node_modules/autoprefixer/package.json"
   "node_modules/react/package.json"
@@ -40,13 +40,6 @@ repair_deps() {
   npm install
 }
 
-ensure_vite_cache() {
-  if [ ! -d node_modules/.vite/deps ] || [ -z "$(ls -A node_modules/.vite/deps 2>/dev/null)" ]; then
-    echo "Pre-optimizando dependencias de Vite..."
-    node node_modules/vite/bin/vite.js optimize --force
-  fi
-}
-
 free_dev_port() {
   lsof -tiTCP:5173 2>/dev/null | xargs kill -9 2>/dev/null || true
   pkill -9 -f "$ROOT/node_modules/.bin/vite" 2>/dev/null || true
@@ -62,7 +55,3 @@ if ! is_deps_valid; then
 fi
 
 free_dev_port
-
-if [ "${ENSURE_VITE_CACHE:-1}" = "1" ]; then
-  ensure_vite_cache
-fi

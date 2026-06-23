@@ -152,6 +152,13 @@ export async function clearOfflineFaceDataset(): Promise<void> {
   localStorage.removeItem(LOCAL_SECRET_KEY)
 }
 
+export function resetOfflineFaceDatasetState() {
+  databasePromise = null
+  refreshPromise = null
+  lastRefreshAt = 0
+  lastRefreshFailedAt = 0
+}
+
 function cosineSimilarity(a: number[], b: number[]): number {
   let dot = 0
   let normA = 0
@@ -169,23 +176,24 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 export function findBestOfflineFaceMatch(dataset: OfflineFaceDataset, descriptor: number[]): OfflineFaceMatch | null {
-  // Aplica la misma idea del backend: umbral minimo y margen contra el segundo mejor resultado.
-  let best: OfflineFaceMatch | null = null
-  let secondBestScore = -1
+  const userScores = new Map<number, OfflineFaceMatch>()
 
   for (const face of dataset.faces) {
     if (face.faceEmbedding.length !== descriptor.length) continue
 
     const score = cosineSimilarity(face.faceEmbedding, descriptor)
-    if (!best || score > best.score) {
-      secondBestScore = best?.score ?? -1
-      best = { face, score }
-    } else if (score > secondBestScore) {
-      secondBestScore = score
+    const currentBest = userScores.get(face.userId)
+    if (!currentBest || score > currentBest.score) {
+      userScores.set(face.userId, { face, score })
     }
   }
 
-  if (!best) return null
+  if (userScores.size === 0) return null
+
+  const rankedUsers = Array.from(userScores.values()).sort((left, right) => right.score - left.score)
+  const best = rankedUsers[0]
+  const secondBestScore = rankedUsers[1]?.score ?? -1
+
   if (best.score < dataset.threshold) return null
   if (secondBestScore !== -1 && best.score - secondBestScore < dataset.minMargin) return null
 

@@ -1,61 +1,54 @@
-import { useCallback, useEffect, useRef, useState } from 'react' // Hooks base de React
+import { useCallback, useEffect, useRef, useState } from 'react'
+
+import { FACE_CAMERA_CONSTRAINTS } from '../config/faceCaptureConfig'
 
 export function useCamera() {
-  const videoRef = useRef<HTMLVideoElement | null>(null) // Referencia al <video> para pintar el stream
-  const [stream, setStream] = useState<MediaStream | null>(null) // Stream activo de la cámara
-  const [error, setError] = useState<string | null>(null) // Mensaje de error si falla getUserMedia
-  const streamRef = useRef<MediaStream | null>(null) // Ref para cleanup estable (evita “apagar” por re-renders)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const [stream, setStream] = useState<MediaStream | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
 
   const start = useCallback(async () => {
-    setError(null) // Limpia error previo
+    setError(null)
     try {
-      // Validación: algunos navegadores/contextos no exponen mediaDevices. // Compatibilidad
       if (!navigator.mediaDevices?.getUserMedia) {
         setError('Este navegador o contexto no soporta cámara (mediaDevices no disponible).')
-        throw new Error('mediaDevices_not_available') // Lanza para que el caller lo capture
+        throw new Error('mediaDevices_not_available')
       }
 
       const s = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'user', // Cámara frontal (si existe)
-          width: { ideal: 1280 }, // Preferencia de resolución (no obligatoria)
-          height: { ideal: 720 }, // Preferencia de resolución (no obligatoria)
-        },
-        audio: false, // No se necesita audio
-      }) // Solicita permisos y obtiene stream
-      streamRef.current = s // Guarda en ref para cleanup estable
-      setStream(s) // Guarda en state para renderizarlo
+        video: FACE_CAMERA_CONSTRAINTS,
+        audio: false,
+      })
+      streamRef.current = s
+      setStream(s)
     } catch (e) {
-      // Mensaje con pista del error (NotAllowedError, NotFoundError, NotReadableError, etc.). // Debug
       const name = e instanceof DOMException ? e.name : 'Error'
       setError(`No se pudo acceder a la cámara (${name}). Revisa permisos del navegador.`)
-      // Importante: re-lanzamos para que el caller no “asuma” que la cámara está lista. // Robustez
       throw e
     }
   }, [])
 
   const stop = useCallback(() => {
-    // Detiene el stream actual (usa ref para asegurar el stream más reciente). // Cleanup
-    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
-    setStream(null) // Limpia el stream (UI)
+    setStream(null)
   }, [])
 
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
     if (!stream) return
-    video.srcObject = stream // Asigna el stream al <video>
-    video.autoplay = true // Ayuda a evitar “pantalla negra” en algunos navegadores
-    video.muted = true // Requisito para autoplay en muchos navegadores
-    video.playsInline = true // Evita fullscreen forzado en iOS
-    video.play().catch(() => {}) // Intenta reproducir (si el navegador lo permite)
+    video.srcObject = stream
+    video.autoplay = true
+    video.muted = true
+    video.playsInline = true
+    video.play().catch(() => {})
   }, [stream])
 
-  // Cleanup SOLO al desmontar el componente (no en cada re-render). // Fix principal
   useEffect(() => {
     return () => {
-      streamRef.current?.getTracks().forEach((t) => t.stop())
+      streamRef.current?.getTracks().forEach(t => t.stop())
       streamRef.current = null
     }
   }, [])

@@ -58,9 +58,12 @@ export function hasLocalCheckIn(userId?: number | null): boolean {
 }
 
 export function getSingleLocalCheckedInUser(): LocalCheckedInUser | null {
-  // Solo devuelve un usuario si no hay ambiguedad; con varios usuarios el backend debe decidir al sincronizar.
   const today = getTodayKey()
   const todayUsers = readCheckedInUsers().filter((item) => item.date === today)
 
   return todayUsers.length === 1 ? todayUsers[0] : null
+}
+
+export function clearLocalAttendanceState() {
+  localStorage.removeItem(LOCAL_CHECKED_IN_USERS_KEY)
 }

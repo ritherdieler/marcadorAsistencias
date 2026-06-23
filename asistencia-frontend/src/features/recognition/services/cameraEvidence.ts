@@ -1,5 +1,14 @@
+import {
+  FACE_CAPTURE_MAX_ADAPTIVE_ITERATIONS,
+  FACE_CAPTURE_MIN_QUALITY,
+  FACE_CAPTURE_PROFILES,
+  FACE_CAPTURE_QUALITY_STEP,
+  FACE_CAPTURE_RESIZE_STEP,
+  type FaceCaptureProfile,
+  type FaceCaptureProfileName,
+} from '../../../config/faceCaptureConfig'
+
 export function captureVideoFrame(video: HTMLVideoElement, quality = 0.82): string | null {
-  // Captura el frame actual del video y lo convierte a JPEG Base64 para enviarlo al backend.
   const width = video.videoWidth
   const height = video.videoHeight
 
@@ -22,13 +31,13 @@ type CaptureBlobOptions = {
   maxHeight?: number
   format?: 'jpeg' | 'png'
   enhanceLowLight?: boolean
+  targetSizeBytes?: number
 }
 
 const LOW_LIGHT_TARGET_LUMA = 118
 const LOW_LIGHT_MAX_GAIN = 1.35
 const LOW_LIGHT_CONTRAST = 1.08
 
-// Mejora suavemente frames oscuros para que el backend pueda detectar el rostro con menos luz.
 function enhanceLowLightIfNeeded(ctx: CanvasRenderingContext2D, width: number, height: number) {
   const imageData = ctx.getImageData(0, 0, width, height)
   const pixels = imageData.data
@@ -57,16 +66,29 @@ function enhanceLowLightIfNeeded(ctx: CanvasRenderingContext2D, width: number, h
   ctx.putImageData(imageData, 0, 0)
 }
 
-// Mantiene cada canal RGB dentro del rango valido de imagen.
 function clampColor(value: number): number {
   return Math.max(0, Math.min(255, Math.round(value)))
 }
 
-export async function captureVideoFrameBlob(
+function canvasToBlob(canvas: HTMLCanvasElement, format: 'jpeg' | 'png', quality: number): Promise<Blob> {
+  const mimeType = format === 'png' ? 'image/png' : 'image/jpeg'
+
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      blob => {
+        if (blob) resolve(blob)
+        else reject(new Error('No se pudo capturar la foto facial.'))
+      },
+      mimeType,
+      format === 'jpeg' ? quality : undefined,
+    )
+  })
+}
+
+async function renderVideoFrameBlob(
   video: HTMLVideoElement,
-  options: CaptureBlobOptions | number = 0.82,
+  options: Required<Pick<CaptureBlobOptions, 'quality' | 'maxWidth' | 'maxHeight' | 'format' | 'enhanceLowLight'>>,
 ): Promise<Blob> {
-  // Captura el frame actual como imagen para que el backend genere el embedding con DJL.
   const sourceWidth = video.videoWidth
   const sourceHeight = video.videoHeight
 
@@ -74,15 +96,9 @@ export async function captureVideoFrameBlob(
     throw new Error('video_not_ready')
   }
 
-  const quality = typeof options === 'number' ? options : options.quality ?? 0.82
-  const format = typeof options === 'number' ? 'jpeg' : options.format ?? 'jpeg'
-  const mimeType = format === 'png' ? 'image/png' : 'image/jpeg'
-  const enhanceLowLight = typeof options === 'number' ? false : options.enhanceLowLight ?? false
-  const maxWidth = typeof options === 'number' ? sourceWidth : options.maxWidth ?? sourceWidth
-  const maxHeight = typeof options === 'number' ? sourceHeight : options.maxHeight ?? sourceHeight
-  const scale = Math.min(maxWidth / sourceWidth, maxHeight / sourceHeight, 1)
-  const width = Math.round(sourceWidth * scale)
-  const height = Math.round(sourceHeight * scale)
+  const scale = Math.min(options.maxWidth / sourceWidth, options.maxHeight / sourceHeight, 1)
+  const width = Math.max(1, Math.round(sourceWidth * scale))
+  const height = Math.max(1, Math.round(sourceHeight * scale))
 
   const canvas = document.createElement('canvas')
   canvas.width = width
@@ -93,19 +109,120 @@ export async function captureVideoFrameBlob(
     throw new Error('No se pudo preparar la captura de camara.')
   }
 
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(video, 0, 0, width, height)
-  if (enhanceLowLight) {
+
+  if (options.enhanceLowLight) {
     enhanceLowLightIfNeeded(ctx, width, height)
   }
 
-  return await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (blob) resolve(blob)
-        else reject(new Error('No se pudo capturar la foto facial.'))
-      },
-      mimeType,
-      format === 'jpeg' ? quality : undefined,
-    )
-  })
+  return canvasToBlob(canvas, options.format, options.quality)
+}
+
+async function compressToTargetSize(
+  video: HTMLVideoElement,
+  baseOptions: Required<Pick<CaptureBlobOptions, 'quality' | 'maxWidth' | 'maxHeight' | 'format' | 'enhanceLowLight'>> & {
+    targetSizeBytes: number
+  },
+): Promise<Blob> {
+  let quality = baseOptions.quality
+  let maxWidth = baseOptions.maxWidth
+  let maxHeight = baseOptions.maxHeight
+
+  for (let iteration = 0; iteration <= FACE_CAPTURE_MAX_ADAPTIVE_ITERATIONS; iteration++) {
+    const blob = await renderVideoFrameBlob(video, {
+      quality,
+      maxWidth,
+      maxHeight,
+      format: baseOptions.format,
+      enhanceLowLight: baseOptions.enhanceLowLight,
+    })
+
+    if (blob.size <= baseOptions.targetSizeBytes) {
+      return blob
+    }
+
+    if (quality - FACE_CAPTURE_QUALITY_STEP >= FACE_CAPTURE_MIN_QUALITY) {
+      quality = Number((quality - FACE_CAPTURE_QUALITY_STEP).toFixed(2))
+      continue
+    }
+
+    if (iteration < FACE_CAPTURE_MAX_ADAPTIVE_ITERATIONS) {
+      maxWidth = Math.max(320, Math.round(maxWidth * FACE_CAPTURE_RESIZE_STEP))
+      maxHeight = Math.max(240, Math.round(maxHeight * FACE_CAPTURE_RESIZE_STEP))
+      quality = baseOptions.quality
+      continue
+    }
+
+    return blob
+  }
+
+  return renderVideoFrameBlob(video, baseOptions)
+}
+
+function resolveCaptureOptions(
+  options: CaptureBlobOptions | number,
+): Required<Pick<CaptureBlobOptions, 'quality' | 'maxWidth' | 'maxHeight' | 'format' | 'enhanceLowLight'>> & {
+  targetSizeBytes?: number
+} {
+  const sourceWidth = 1280
+  const sourceHeight = 720
+
+  if (typeof options === 'number') {
+    return {
+      quality: options,
+      format: 'jpeg',
+      maxWidth: sourceWidth,
+      maxHeight: sourceHeight,
+      enhanceLowLight: false,
+    }
+  }
+
+  return {
+    quality: options.quality ?? 0.82,
+    format: options.format ?? 'jpeg',
+    maxWidth: options.maxWidth ?? sourceWidth,
+    maxHeight: options.maxHeight ?? sourceHeight,
+    enhanceLowLight: options.enhanceLowLight ?? false,
+    targetSizeBytes: options.targetSizeBytes,
+  }
+}
+
+export async function captureVideoFrameBlob(
+  video: HTMLVideoElement,
+  options: CaptureBlobOptions | number = 0.82,
+): Promise<Blob> {
+  const resolved = resolveCaptureOptions(options)
+
+  if (resolved.targetSizeBytes) {
+    return compressToTargetSize(video, {
+      quality: resolved.quality,
+      maxWidth: resolved.maxWidth,
+      maxHeight: resolved.maxHeight,
+      format: resolved.format,
+      enhanceLowLight: resolved.enhanceLowLight,
+      targetSizeBytes: resolved.targetSizeBytes,
+    })
+  }
+
+  return renderVideoFrameBlob(video, resolved)
+}
+
+function profileToCaptureOptions(profile: FaceCaptureProfile): CaptureBlobOptions {
+  return {
+    maxWidth: profile.maxWidth,
+    maxHeight: profile.maxHeight,
+    quality: profile.quality,
+    format: profile.format,
+    enhanceLowLight: profile.enhanceLowLight,
+    targetSizeBytes: profile.targetSizeBytes,
+  }
+}
+
+export async function captureFacePhoto(
+  video: HTMLVideoElement,
+  profile: FaceCaptureProfileName,
+): Promise<Blob> {
+  return captureVideoFrameBlob(video, profileToCaptureOptions(FACE_CAPTURE_PROFILES[profile]))
 }

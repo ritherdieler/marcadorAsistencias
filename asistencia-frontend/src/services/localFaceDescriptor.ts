@@ -1,29 +1,23 @@
 import { FaceDetector, FilesetResolver, type Detection } from '@mediapipe/tasks-vision'
 import * as ort from 'onnxruntime-web/wasm'
 
+import {
+  FACE_OFFLINE_CENTER_CROP_SPECS,
+  FACE_OFFLINE_DETECTED_CROP_SCALES,
+  FACE_OFFLINE_DETECTOR_MIN_CONFIDENCE,
+  FACE_OFFLINE_LIGHTING_VARIANTS,
+  FACE_PREPROCESS_INPUT_SIZE,
+  FACE_PREPROCESS_MARGIN_RATIO,
+} from '../config/faceCaptureConfig'
+
 const MODEL_URL = '/models/face-feature/face_feature.onnx'
 const MEDIAPIPE_WASM_PATH = '/mediapipe/wasm'
 const MEDIAPIPE_FACE_MODEL_PATH = '/mediapipe/models/blaze_face_short_range.tflite'
-const INPUT_SIZE = 224
+const INPUT_SIZE = FACE_PREPROCESS_INPUT_SIZE
 
-const LIGHTING_VARIANTS = [
-  { brightness: 0, contrast: 1, gamma: 1 },
-  { brightness: 18, contrast: 1.18, gamma: 0.82 },
-  { brightness: 32, contrast: 1.28, gamma: 0.72 },
-]
-
-const FACE_CROP_SPECS = [
-  { scale: 2.2, centerYShift: 0.08 },
-  { scale: 2.8, centerYShift: 0.12 },
-  { scale: 3.4, centerYShift: 0.16 },
-]
-
-const CROP_SPECS = [
-  { widthRatio: 0.82, heightRatio: 0.92, centerYRatio: 0.48 },
-  { widthRatio: 0.68, heightRatio: 0.82, centerYRatio: 0.44 },
-  { widthRatio: 0.96, heightRatio: 0.96, centerYRatio: 0.5 },
-  { widthRatio: 1, heightRatio: 1, centerYRatio: 0.5 },
-]
+const LIGHTING_VARIANTS = [...FACE_OFFLINE_LIGHTING_VARIANTS]
+const FACE_CROP_SPECS = [...FACE_OFFLINE_DETECTED_CROP_SCALES]
+const CROP_SPECS = [...FACE_OFFLINE_CENTER_CROP_SPECS]
 
 type CropSpec = (typeof CROP_SPECS)[number]
 type FaceCropSpec = (typeof FACE_CROP_SPECS)[number]
@@ -36,17 +30,25 @@ type CropArea = {
   sh: number
 }
 
+type PreparedCrop = CropArea & {
+  alignedCanvas?: HTMLCanvasElement
+}
+
+type FaceLandmarks = {
+  leftEye: { x: number; y: number }
+  rightEye: { x: number; y: number }
+  nose: { x: number; y: number }
+}
+
 let sessionPromise: Promise<ort.InferenceSession> | null = null
 let faceDetectorPromise: Promise<FaceDetector> | null = null
 
 function configureOnnxRuntime() {
-  // Usa ONNX Runtime empaquetado por Vite; no importa modulos desde public.
   ort.env.wasm.numThreads = 1
   ort.env.wasm.proxy = false
 }
 
 async function getSession(): Promise<ort.InferenceSession> {
-  // Carga el modelo una sola vez; las siguientes marcaciones reutilizan la sesion.
   if (!sessionPromise) {
     configureOnnxRuntime()
     sessionPromise = ort.InferenceSession.create(MODEL_URL, {
@@ -59,7 +61,6 @@ async function getSession(): Promise<ort.InferenceSession> {
 }
 
 async function getImageFaceDetector(): Promise<FaceDetector> {
-  // Detector local usado solo para recortar el rostro antes de generar el descriptor offline.
   if (!faceDetectorPromise) {
     faceDetectorPromise = FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_PATH).then((vision) =>
       FaceDetector.createFromOptions(vision, {
@@ -68,7 +69,7 @@ async function getImageFaceDetector(): Promise<FaceDetector> {
           delegate: 'CPU',
         },
         runningMode: 'IMAGE',
-        minDetectionConfidence: 0.15,
+        minDetectionConfidence: FACE_OFFLINE_DETECTOR_MIN_CONFIDENCE,
       }),
     )
   }
@@ -89,8 +90,61 @@ function toPixelBox(face: Detection, image: ImageBitmap) {
   }
 }
 
-async function getDetectedFaceCrops(image: ImageBitmap): Promise<CropArea[]> {
-  // En offline recorta usando el rostro real detectado; si falla, se usan los recortes centrados de respaldo.
+function estimateLandmarks(box: { x: number; y: number; width: number; height: number }): FaceLandmarks {
+  const centerX = box.x + box.width / 2
+  const eyeY = box.y + box.height * 0.38
+  const eyeOffsetX = box.width * 0.18
+  const noseY = box.y + box.height * 0.56
+
+  return {
+    leftEye: { x: centerX - eyeOffsetX, y: eyeY },
+    rightEye: { x: centerX + eyeOffsetX, y: eyeY },
+    nose: { x: centerX, y: noseY },
+  }
+}
+
+function alignFaceToCanvas(image: ImageBitmap, landmarks: FaceLandmarks): PreparedCrop | null {
+  const leftEye = landmarks.leftEye
+  const rightEye = landmarks.rightEye
+  const nose = landmarks.nose
+  const eyeDistance = Math.hypot(rightEye.x - leftEye.x, rightEye.y - leftEye.y)
+  if (eyeDistance < 8) return null
+
+  const angle = Math.atan2(rightEye.y - leftEye.y, rightEye.x - leftEye.x)
+  const eyeCenterX = (leftEye.x + rightEye.x) / 2
+  const eyeCenterY = (leftEye.y + rightEye.y) / 2
+  const targetEyeDistance = INPUT_SIZE * 0.36
+  const scale = targetEyeDistance / eyeDistance
+  const noseOffsetY = nose.y - eyeCenterY
+  const targetCenterX = INPUT_SIZE / 2
+  const targetCenterY = INPUT_SIZE * 0.42
+
+  const canvas = document.createElement('canvas')
+  canvas.width = INPUT_SIZE
+  canvas.height = INPUT_SIZE
+  const context = canvas.getContext('2d')
+  if (!context) return null
+
+  context.fillStyle = '#000000'
+  context.fillRect(0, 0, INPUT_SIZE, INPUT_SIZE)
+  context.imageSmoothingEnabled = true
+  context.imageSmoothingQuality = 'high'
+  context.translate(targetCenterX, targetCenterY)
+  context.rotate(-angle)
+  context.scale(scale, scale)
+  context.translate(-eyeCenterX, -(eyeCenterY + noseOffsetY * 0.35))
+  context.drawImage(image, 0, 0)
+
+  return {
+    sx: 0,
+    sy: 0,
+    sw: INPUT_SIZE,
+    sh: INPUT_SIZE,
+    alignedCanvas: canvas,
+  }
+}
+
+async function getDetectedFaceCrops(image: ImageBitmap): Promise<PreparedCrop[]> {
   try {
     const detector = await getImageFaceDetector()
     const result = detector.detect(image)
@@ -102,7 +156,19 @@ async function getDetectedFaceCrops(image: ImageBitmap): Promise<CropArea[]> {
     const mainFace = detections[0]?.box
     if (!mainFace) return []
 
-    return FACE_CROP_SPECS.map((spec) => getFaceCrop(image, mainFace, spec))
+    const aligned = alignFaceToCanvas(image, estimateLandmarks(mainFace))
+    const marginRatio = FACE_PREPROCESS_MARGIN_RATIO
+    const marginX = mainFace.width * marginRatio
+    const marginY = mainFace.height * marginRatio
+    const marginBox = {
+      x: Math.max(0, mainFace.x - marginX),
+      y: Math.max(0, mainFace.y - marginY),
+      width: Math.min(image.width, mainFace.x + mainFace.width + marginX) - Math.max(0, mainFace.x - marginX),
+      height: Math.min(image.height, mainFace.y + mainFace.height + marginY) - Math.max(0, mainFace.y - marginY),
+    }
+
+    const detectedCrops = FACE_CROP_SPECS.map((spec) => getFaceCrop(image, marginBox, spec))
+    return aligned ? [aligned, ...detectedCrops] : detectedCrops
   } catch {
     faceDetectorPromise = null
     return []
@@ -114,7 +180,6 @@ function getFaceCrop(
   box: { x: number; y: number; width: number; height: number },
   spec: FaceCropSpec,
 ): CropArea {
-  // Expande el rostro detectado para incluir frente, menton y contexto, parecido al recorte del backend.
   const faceSize = Math.max(box.width, box.height)
   const cropSize = Math.min(Math.max(faceSize * spec.scale, faceSize), Math.max(image.width, image.height))
   const centerX = box.x + box.width / 2
@@ -128,7 +193,6 @@ function getFaceCrop(
 }
 
 function getCenteredCrop(image: ImageBitmap, spec: CropSpec): CropArea {
-  // Replica los recortes de respaldo del backend para mantener el mismo criterio de descriptor.
   const sw = image.width * spec.widthRatio
   const sh = image.height * spec.heightRatio
   const centerX = image.width / 2
@@ -141,26 +205,33 @@ function getCenteredCrop(image: ImageBitmap, spec: CropSpec): CropArea {
 }
 
 function clampPixel(value: number): number {
-  return Math.max(0, Math.min(255, value))
+  return Math.max(0, Math.min(255, Math.round(value)))
 }
 
 function adjustLighting(value: number, variant: LightingVariant): number {
-  // Corrige poca luz de forma suave antes de normalizar, sin cambiar el flujo de reconocimiento.
   const contrasted = (value - 127.5) * variant.contrast + 127.5 + variant.brightness
   const normalized = clampPixel(contrasted) / 255
   return clampPixel(255 * normalized ** variant.gamma)
 }
 
-function preprocessImage(image: ImageBitmap, crop: CropArea, lighting: LightingVariant): Float32Array {
-  // Convierte la imagen a tensor NCHW y aplica la normalizacion usada por DJL: (pixel - 127.5) / 128.
-  const canvas = document.createElement('canvas')
-  canvas.width = INPUT_SIZE
-  canvas.height = INPUT_SIZE
+function preprocessImage(
+  image: ImageBitmap,
+  crop: PreparedCrop,
+  lighting: LightingVariant,
+): Float32Array {
+  const canvas = crop.alignedCanvas ?? document.createElement('canvas')
+  if (!crop.alignedCanvas) {
+    canvas.width = INPUT_SIZE
+    canvas.height = INPUT_SIZE
+    const context = canvas.getContext('2d', { willReadFrequently: true })
+    if (!context) throw new Error('No se pudo preparar el canvas para el modelo facial offline.')
+    context.imageSmoothingEnabled = true
+    context.imageSmoothingQuality = 'high'
+    context.drawImage(image, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, INPUT_SIZE, INPUT_SIZE)
+  }
 
   const context = canvas.getContext('2d', { willReadFrequently: true })
   if (!context) throw new Error('No se pudo preparar el canvas para el modelo facial offline.')
-
-  context.drawImage(image, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, INPUT_SIZE, INPUT_SIZE)
 
   const { data } = context.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE)
   const tensor = new Float32Array(1 * 3 * INPUT_SIZE * INPUT_SIZE)
@@ -185,10 +256,9 @@ function preprocessImage(image: ImageBitmap, crop: CropArea, lighting: LightingV
 
 async function runDescriptorModel(
   image: ImageBitmap,
-  crop: CropArea,
-  lighting: LightingVariant
+  crop: PreparedCrop,
+  lighting: LightingVariant,
 ): Promise<number[]> {
-  // Ejecuta el ONNX exportado desde face_feature.pt y devuelve el embedding de 512 valores.
   const session = await getSession()
   const inputName = session.inputNames[0]
   const outputName = session.outputNames[0]
@@ -200,7 +270,6 @@ async function runDescriptorModel(
 }
 
 export async function generateLocalFaceDescriptorCandidates(photo: Blob): Promise<number[][]> {
-  // Genera varios candidatos como el backend; la comparacion elegira el match mas confiable.
   const image = await createImageBitmap(photo)
 
   try {
@@ -225,8 +294,6 @@ export async function generateLocalFaceDescriptorCandidates(photo: Blob): Promis
 }
 
 export async function generateLocalFaceDescriptor(photo: Blob): Promise<number[] | null> {
-  // Mantiene compatibilidad con el flujo anterior devolviendo el primer descriptor disponible.
   const descriptors = await generateLocalFaceDescriptorCandidates(photo)
   return descriptors[0] ?? null
 }
-

@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 
-import { clearAuth, getAuthUser } from '../../features/auth/utils/authStorage'
+import { clearAllLocalAppData } from '../../services/localAppData'
+import { getAuthUser } from '../../features/auth/utils/authStorage'
 
 function Icon({ name }: { name: 'dashboard' | 'registro' | 'asistencias' }) {
   const paths: Record<typeof name, string> = {
@@ -58,8 +59,8 @@ export function AdminLayout() {
   const navigate = useNavigate()
   const user = getAuthUser()
 
-  function logout() {
-    clearAuth()
+  async function logout() {
+    await clearAllLocalAppData()
     navigate('/login', { replace: true })
   }
 

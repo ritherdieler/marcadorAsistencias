@@ -106,6 +106,11 @@ export async function getOfflineAttendanceCount(): Promise<number> {
   return records.length
 }
 
+export async function clearOfflineAttendanceQueue(): Promise<void> {
+  const records = await getOfflineAttendanceRecords()
+  await Promise.all(records.map(record => deleteOfflineAttendanceRecord(record.id)))
+}
+
 async function deleteOfflineAttendanceRecord(id: string): Promise<void> {
   await runStoreOperation('readwrite', (store) => store.delete(id))
 }

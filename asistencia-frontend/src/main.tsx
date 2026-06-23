@@ -5,8 +5,11 @@ import { BrowserRouter } from 'react-router-dom'
 
 import App from './App'
 import './assets/app.css'
+import { ensureLocalDataReset } from './services/localAppData'
 
 const queryClient = new QueryClient()
+
+void ensureLocalDataReset()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
