@@ -1,6 +1,7 @@
 import type { RefObject } from 'react'
 
 import { Alert } from '../../../../components/ui/Alert'
+import { ProcessingOverlay } from '../../../../components/ui/ProcessingOverlay'
 import { FaceBoxOverlay } from '../../../recognition/components/FaceBoxOverlay'
 import { FaceCoverageIndicator } from '../../../recognition/components/FaceCoverageIndicator'
 import type { FaceAlignment } from '../../../recognition/services/faceAlignment'
@@ -16,6 +17,7 @@ type CameraStageProps = {
   alignment: FaceAlignment
   countdown: number | null
   capturing: boolean
+  captureProgress?: number
   statusMessage: string
   cameraError: string | null
   permissionDenied: boolean
@@ -40,6 +42,7 @@ export function CameraStage({
   alignment,
   countdown,
   capturing,
+  captureProgress,
   statusMessage,
   cameraError,
   permissionDenied,
@@ -77,6 +80,13 @@ export function CameraStage({
         )}
         {showVideo && <CaptureCountdown value={countdown} />}
 
+        <ProcessingOverlay
+          open={capturing}
+          title="Procesando captura..."
+          progress={captureProgress}
+          scope="container"
+        />
+
         {permissionDenied && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-950 px-6 text-center text-white">
             <p className="text-sm font-semibold">No pudimos acceder a la camara.</p>
@@ -100,8 +110,8 @@ export function CameraStage({
         )}
 
         {capturing && (
-          <div className="absolute bottom-3 left-3 right-3 rounded-lg bg-slate-950/70 px-3 py-2 text-center text-xs font-semibold text-white backdrop-blur-sm">
-            Capturando...
+          <div className="sr-only" aria-live="polite">
+            Procesando captura...
           </div>
         )}
       </div>

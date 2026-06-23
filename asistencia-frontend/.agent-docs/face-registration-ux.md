@@ -118,6 +118,39 @@ En [`AttendanceMarker`](../src/features/attendance/components/AttendanceMarker.t
 - `FaceBoxOverlay` + `FaceCoverageIndicator` en vivo sobre el video.
 - Mensajes con porcentaje en la region `aria-live="polite"`.
 - La identificacion solo dispara cuando `alignment === 'aligned'` (ancho >= 25%, centrado). El video no se espeja (kiosko).
+- Overlay [`ProcessingOverlay`](../src/components/ui/ProcessingOverlay.tsx) durante captura/procesamiento con fases `capturing` → `identifying` → `confirming` y progreso estimado 0–100%.
+
+## Loader de captura (alta resolucion)
+
+Evita la sensacion de pagina congelada al procesar fotos en canvas.
+
+| Pieza | Rol |
+|-------|-----|
+| [`ProcessingOverlay.tsx`](../src/components/ui/ProcessingOverlay.tsx) | Overlay fullscreen o sobre el video: spinner, mensaje, barra y % |
+| [`yieldToUi.ts`](../src/utils/yieldToUi.ts) | Doble `requestAnimationFrame` antes del trabajo pesado para que React pinte el loader |
+| [`monotonicProgress.ts`](../src/utils/monotonicProgress.ts) | Progreso que nunca retrocede |
+| [`cameraEvidence.ts`](../src/features/recognition/services/cameraEvidence.ts) | `captureFacePhoto(..., onProgress?)` reporta % por etapa |
+
+### Progreso estimado por etapa
+
+| Etapa | % |
+|-------|---|
+| Inicio / yield UI | 5 |
+| Frame en canvas | 35 |
+| Mejora de luz | 55 |
+| Compresion JPEG (1–4 iteraciones) | 60–85 |
+| Blob listo | 90 |
+| API (identificar / confirmar) | 95–100 |
+
+### Integracion
+
+- **Marcacion:** overlay viewport; modales de confirmacion en `z-[80]`, overlay en `z-[70]`.
+- **Registro (captura):** overlay `scope="container"` sobre el video en `CameraStage`.
+- **Registro (submit):** overlay viewport en `AdminRegistration` mientras `busy`.
+
+### Camara
+
+En [`faceCaptureConfig.ts`](../src/config/faceCaptureConfig.ts): `max 1280×720` en `FACE_CAMERA_CONSTRAINTS` para evitar streams 4K innecesarios.
 
 ## Build verification (2026-06-23)
 

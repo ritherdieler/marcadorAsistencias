@@ -7,6 +7,10 @@ import {
   type FaceCaptureProfile,
   type FaceCaptureProfileName,
 } from '../../../config/faceCaptureConfig'
+import { createMonotonicProgress, type ProgressCallback } from '../../../utils/monotonicProgress'
+import { yieldToUi } from '../../../utils/yieldToUi'
+
+export type CaptureProgressCallback = ProgressCallback
 
 export function captureVideoFrame(video: HTMLVideoElement, quality = 0.82): string | null {
   const width = video.videoWidth
@@ -88,6 +92,7 @@ function canvasToBlob(canvas: HTMLCanvasElement, format: 'jpeg' | 'png', quality
 async function renderVideoFrameBlob(
   video: HTMLVideoElement,
   options: Required<Pick<CaptureBlobOptions, 'quality' | 'maxWidth' | 'maxHeight' | 'format' | 'enhanceLowLight'>>,
+  report?: ProgressCallback,
 ): Promise<Blob> {
   const sourceWidth = video.videoWidth
   const sourceHeight = video.videoHeight
@@ -112,12 +117,21 @@ async function renderVideoFrameBlob(
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(video, 0, 0, width, height)
+  report?.(35)
+  await yieldToUi()
 
   if (options.enhanceLowLight) {
     enhanceLowLightIfNeeded(ctx, width, height)
+    report?.(55)
+    await yieldToUi()
   }
 
   return canvasToBlob(canvas, options.format, options.quality)
+}
+
+function compressionIterationProgress(iteration: number): number {
+  const maxIterations = FACE_CAPTURE_MAX_ADAPTIVE_ITERATIONS + 1
+  return 60 + Math.round((iteration / maxIterations) * 25)
 }
 
 async function compressToTargetSize(
@@ -125,19 +139,27 @@ async function compressToTargetSize(
   baseOptions: Required<Pick<CaptureBlobOptions, 'quality' | 'maxWidth' | 'maxHeight' | 'format' | 'enhanceLowLight'>> & {
     targetSizeBytes: number
   },
+  report?: ProgressCallback,
 ): Promise<Blob> {
   let quality = baseOptions.quality
   let maxWidth = baseOptions.maxWidth
   let maxHeight = baseOptions.maxHeight
 
   for (let iteration = 0; iteration <= FACE_CAPTURE_MAX_ADAPTIVE_ITERATIONS; iteration++) {
-    const blob = await renderVideoFrameBlob(video, {
-      quality,
-      maxWidth,
-      maxHeight,
-      format: baseOptions.format,
-      enhanceLowLight: baseOptions.enhanceLowLight,
-    })
+    report?.(compressionIterationProgress(iteration))
+    await yieldToUi()
+
+    const blob = await renderVideoFrameBlob(
+      video,
+      {
+        quality,
+        maxWidth,
+        maxHeight,
+        format: baseOptions.format,
+        enhanceLowLight: baseOptions.enhanceLowLight,
+      },
+      report,
+    )
 
     if (blob.size <= baseOptions.targetSizeBytes) {
       return blob
@@ -158,7 +180,7 @@ async function compressToTargetSize(
     return blob
   }
 
-  return renderVideoFrameBlob(video, baseOptions)
+  return renderVideoFrameBlob(video, baseOptions, report)
 }
 
 function resolveCaptureOptions(
@@ -192,21 +214,27 @@ function resolveCaptureOptions(
 export async function captureVideoFrameBlob(
   video: HTMLVideoElement,
   options: CaptureBlobOptions | number = 0.82,
+  onProgress?: CaptureProgressCallback,
 ): Promise<Blob> {
+  const report = createMonotonicProgress(onProgress)
   const resolved = resolveCaptureOptions(options)
 
   if (resolved.targetSizeBytes) {
-    return compressToTargetSize(video, {
-      quality: resolved.quality,
-      maxWidth: resolved.maxWidth,
-      maxHeight: resolved.maxHeight,
-      format: resolved.format,
-      enhanceLowLight: resolved.enhanceLowLight,
-      targetSizeBytes: resolved.targetSizeBytes,
-    })
+    return compressToTargetSize(
+      video,
+      {
+        quality: resolved.quality,
+        maxWidth: resolved.maxWidth,
+        maxHeight: resolved.maxHeight,
+        format: resolved.format,
+        enhanceLowLight: resolved.enhanceLowLight,
+        targetSizeBytes: resolved.targetSizeBytes,
+      },
+      report,
+    )
   }
 
-  return renderVideoFrameBlob(video, resolved)
+  return renderVideoFrameBlob(video, resolved, report)
 }
 
 function profileToCaptureOptions(profile: FaceCaptureProfile): CaptureBlobOptions {
@@ -223,6 +251,13 @@ function profileToCaptureOptions(profile: FaceCaptureProfile): CaptureBlobOption
 export async function captureFacePhoto(
   video: HTMLVideoElement,
   profile: FaceCaptureProfileName,
+  onProgress?: CaptureProgressCallback,
 ): Promise<Blob> {
-  return captureVideoFrameBlob(video, profileToCaptureOptions(FACE_CAPTURE_PROFILES[profile]))
+  const report = createMonotonicProgress(onProgress)
+  report(5)
+  await yieldToUi()
+
+  const blob = await captureVideoFrameBlob(video, profileToCaptureOptions(FACE_CAPTURE_PROFILES[profile]), report)
+  report(90)
+  return blob
 }

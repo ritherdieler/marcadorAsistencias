@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { LoadingButton } from '../../../components/ui/LoadingButton'
 import { ModalAlert } from '../../../components/ui/ModalAlert'
+import { ProcessingOverlay } from '../../../components/ui/ProcessingOverlay'
 import type { UserType } from '../../../types/user'
 import { userRoleOptions } from '../../../utils/userRole'
 import {
@@ -85,6 +86,7 @@ export function AdminRegistration() {
   const [mode, setMode] = useState<RegistrationMode>('EXISTENTE')
   const [step, setStep] = useState<Step>('data')
   const [busy, setBusy] = useState(false)
+  const [registerProgress, setRegisterProgress] = useState(0)
   const [alert, setAlert] = useState<AlertState | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
@@ -209,11 +211,15 @@ export function AdminRegistration() {
     }
 
     setBusy(true)
+    setRegisterProgress(10)
     try {
       if (mode === 'EXISTENTE') {
+        setRegisterProgress(40)
         await registerMultiAngleFaceForExistingUser(existingUsername.trim(), existingPassword, blobs)
+        setRegisterProgress(100)
         finishSuccess('Rostro registrado correctamente en tres angulos.')
       } else {
+        setRegisterProgress(40)
         const created = await createUserAndRegisterMultiAngleFace(
           {
             name: newName.trim(),
@@ -229,6 +235,7 @@ export function AdminRegistration() {
           },
           blobs,
         )
+        setRegisterProgress(100)
         finishSuccess(`Usuario creado y rostro registrado: ${created.username ?? created.id}`)
       }
     } catch (error) {
@@ -237,11 +244,19 @@ export function AdminRegistration() {
       setAlert({ variant: message === reason ? 'error' : 'warning', message })
     } finally {
       setBusy(false)
+      setRegisterProgress(0)
     }
   }
 
   return (
     <div className="space-y-6">
+      <ProcessingOverlay
+        open={busy}
+        title="Registrando rostro..."
+        description="Subiendo las capturas al servidor."
+        progress={registerProgress}
+        scope="viewport"
+      />
       <div>
         <h2 className="text-xl font-bold text-slate-900">Registro de colaboradores</h2>
         <p className="mt-1 text-sm text-slate-600">Selecciona un usuario existente o crea uno nuevo y registra su rostro.</p>
@@ -284,6 +299,7 @@ export function AdminRegistration() {
                   alignment={enroll.alignment}
                   countdown={enroll.countdown}
                   capturing={enroll.capturing}
+                  captureProgress={enroll.captureProgress}
                   statusMessage={enroll.statusMessage}
                   cameraError={enroll.cameraError}
                   permissionDenied={enroll.permissionDenied}

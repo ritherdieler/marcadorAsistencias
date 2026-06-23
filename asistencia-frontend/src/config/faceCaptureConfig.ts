@@ -11,8 +11,8 @@ export type FaceCaptureProfile = {
 
 export const FACE_CAMERA_CONSTRAINTS = {
   facingMode: 'user' as const,
-  width: { min: 640, ideal: 1280 },
-  height: { min: 480, ideal: 720 },
+  width: { min: 640, ideal: 1280, max: 1280 },
+  height: { min: 480, ideal: 720, max: 720 },
 }
 
 export const FACE_CAPTURE_MIN_QUALITY = 0.7

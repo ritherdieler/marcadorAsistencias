@@ -13,8 +13,9 @@ Unified capture and matching parameters across web (`asistencia-frontend`), Andr
 ### Web
 
 - Config: [`src/config/faceCaptureConfig.ts`](../src/config/faceCaptureConfig.ts)
-- Capture: [`src/features/recognition/services/cameraEvidence.ts`](../src/features/recognition/services/cameraEvidence.ts) → `captureFacePhoto(video, profile)`
-- Camera constraints: `ideal 1280×720`, `min 640×480` via [`src/hooks/useCamera.ts`](../src/hooks/useCamera.ts)
+- Capture: [`src/features/recognition/services/cameraEvidence.ts`](../src/features/recognition/services/cameraEvidence.ts) → `captureFacePhoto(video, profile, onProgress?)`
+- Camera constraints: `ideal/max 1280×720`, `min 640×480` via [`src/hooks/useCamera.ts`](../src/hooks/useCamera.ts)
+- Capture progress: optional `onProgress(percent)` callback; monotonic 5→90 during canvas work, 95–100 during API phases in UI
 - Adaptive compression: lowers JPEG quality in steps of 0.05 (min 0.70), then reduces resolution by 10% (max 3 iterations)
 
 ### Android

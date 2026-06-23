@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useCamera } from '../../../hooks/useCamera'
+import { createMonotonicProgress } from '../../../utils/monotonicProgress'
+import { yieldToUi } from '../../../utils/yieldToUi'
 import { captureFacePhoto } from '../../recognition/services/cameraEvidence'
 import { detectVisibleFacePose, type FaceBox } from '../../recognition/services/facePresenceDetector'
 import { evaluateFaceAlignment, faceAlignmentMessage, getFaceWidthPercent, type FaceAlignment } from '../../recognition/services/faceAlignment'
@@ -56,6 +58,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
   const [captures, setCaptures] = useState<Record<CaptureAngle, AngleCaptureState>>(emptyCaptures)
   const [countdown, setCountdown] = useState<number | null>(null)
   const [capturing, setCapturing] = useState(false)
+  const [captureProgress, setCaptureProgress] = useState(0)
   const [statusMessage, setStatusMessage] = useState('Activando camara...')
 
   const capturesRef = useRef(captures)
@@ -93,11 +96,16 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
     if (capturingRef.current) return
     capturingRef.current = true
     setCapturing(true)
+    setCaptureProgress(0)
     setCountdown(null)
     alignedSinceRef.current = null
 
     try {
-      const blob = await captureFacePhoto(video, 'enrollment')
+      const report = createMonotonicProgress(setCaptureProgress)
+      setCaptureProgress(5)
+      await yieldToUi()
+      const blob = await captureFacePhoto(video, 'enrollment', report)
+      setCaptureProgress(100)
       const previewUrl = URL.createObjectURL(blob)
       const previous = capturesRef.current
       const previousUrl = previous[angle].previewUrl
@@ -119,6 +127,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
     } finally {
       capturingRef.current = false
       setCapturing(false)
+      setCaptureProgress(0)
     }
   }, [])
 
@@ -315,6 +324,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
     captures,
     countdown,
     capturing,
+    captureProgress,
     statusMessage,
     capturedCount,
     isComplete,

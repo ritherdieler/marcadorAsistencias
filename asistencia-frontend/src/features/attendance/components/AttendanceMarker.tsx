@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { LoadingButton } from '../../../components/ui/LoadingButton'
+import { ProcessingOverlay } from '../../../components/ui/ProcessingOverlay'
 import { useCamera } from '../../../hooks/useCamera'
 import {
   enqueueOfflineAttendance,
@@ -25,6 +26,9 @@ import {
   type FaceAlignment,
 } from '../../recognition/services/faceAlignment'
 import { useFaceCoverageConfig } from '../../recognition/hooks/useFaceCoverageConfig'
+import { yieldToUi } from '../../../utils/yieldToUi'
+
+type CapturePhase = 'idle' | 'capturing' | 'identifying' | 'confirming'
 
 type AttendanceResult = {
   title: string
@@ -86,7 +90,8 @@ export function AttendanceMarker() {
   const [unrecognizedDialog, setUnrecognizedDialog] = useState<string | null>(null)
   const [result, setResult] = useState<AttendanceResult | null>(null)
   const [identifying, setIdentifying] = useState(false)
-  const [processingFace, setProcessingFace] = useState(false)
+  const [capturePhase, setCapturePhase] = useState<CapturePhase>('idle')
+  const [captureProgress, setCaptureProgress] = useState(0)
   const [confirming, setConfirming] = useState(false)
   const [checkingOut, setCheckingOut] = useState(false)
   const [offlinePendingCount, setOfflinePendingCount] = useState(0)
@@ -103,7 +108,8 @@ export function AttendanceMarker() {
     identityConfirmedAtRef.current = null
     setIdentified(null)
     setIdentifying(false)
-    setProcessingFace(false)
+    setCapturePhase('idle')
+    setCaptureProgress(0)
     setConfirming(false)
     setCheckingOut(false)
     if (clearDialogs) {
@@ -297,7 +303,7 @@ export function AttendanceMarker() {
   }, [offlinePendingCount, synchronizeOfflineRecords])
 
   const identifyCurrentFace = useCallback(async () => {
-    if (!cameraEnabled || !cameraReady || !stream || identifying || confirming || identified || unrecognizedDialog || result) return
+    if (!cameraEnabled || !cameraReady || !stream || identifying || capturePhase !== 'idle' || confirming || identified || unrecognizedDialog || result) return
 
     setIdentifying(true)
     let capturedPhoto: Blob | null = null
@@ -340,12 +346,17 @@ export function AttendanceMarker() {
       }
       lastFaceBoxRef.current = faceState.box ?? null
 
-      setProcessingFace(true)
-      capturedPhoto = await captureFacePhoto(video, 'verification')
+      setCapturePhase('capturing')
+      setCaptureProgress(5)
+      await yieldToUi()
+      capturedPhoto = await captureFacePhoto(video, 'verification', setCaptureProgress)
 
       if (attemptId !== identityAttemptRef.current) return
 
+      setCapturePhase('identifying')
+      setCaptureProgress(95)
       const res = await identifyFacePhoto(capturedPhoto)
+      setCaptureProgress(100)
       if (attemptId !== identityAttemptRef.current) return
 
       const currentFaceState = await detectVisibleFacePose(video)
@@ -417,9 +428,10 @@ export function AttendanceMarker() {
       )
     } finally {
       setIdentifying(false)
-      setProcessingFace(false)
+      setCapturePhase('idle')
+      setCaptureProgress(0)
     }
-  }, [alignmentConfig, cameraEnabled, cameraReady, clearCurrentIdentity, confirming, identified, identifyOfflineFace, identifying, result, stream, unrecognizedDialog, videoRef])
+  }, [alignmentConfig, cameraEnabled, cameraReady, capturePhase, clearCurrentIdentity, confirming, identified, identifyOfflineFace, identifying, result, stream, unrecognizedDialog, videoRef])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -478,6 +490,8 @@ export function AttendanceMarker() {
     if (!identified) return
 
     setConfirming(true)
+    setCapturePhase('confirming')
+    setCaptureProgress(95)
     try {
       const res = await verifyFacePhoto(identified.photo, 'CHECK_IN')
       if (res.requiresReenrollment) {
@@ -518,6 +532,7 @@ export function AttendanceMarker() {
         checkInTime,
         variant: res.alreadyRegistered || isLate ? 'warning' : 'success',
       })
+      setCaptureProgress(100)
       setIdentified(null)
     } catch (error) {
       if (isConnectionError(error)) {
@@ -547,11 +562,15 @@ export function AttendanceMarker() {
       setMessage('Error al registrar asistencia. Revisa el backend.')
     } finally {
       setConfirming(false)
+      setCapturePhase('idle')
+      setCaptureProgress(0)
     }
   }
 
   async function markCheckOut() {
     setCheckingOut(true)
+    setCapturePhase('confirming')
+    setCaptureProgress(95)
     let photo = identified?.photo
 
     try {
@@ -563,7 +582,12 @@ export function AttendanceMarker() {
           setMessage('No se detecto rostro para marcar salida.')
           return
         }
-        photo = await captureFacePhoto(video, 'verification')
+        setCapturePhase('capturing')
+        setCaptureProgress(5)
+        await yieldToUi()
+        photo = await captureFacePhoto(video, 'verification', setCaptureProgress)
+        setCapturePhase('confirming')
+        setCaptureProgress(95)
       }
 
       if (!photo) {
@@ -573,6 +597,7 @@ export function AttendanceMarker() {
       }
 
       const res = await verifyFacePhoto(photo, 'CHECK_OUT')
+      setCaptureProgress(100)
       if (res.requiresReenrollment) {
         setResult({
           title: 'Revalidacion facial requerida',
@@ -626,6 +651,8 @@ export function AttendanceMarker() {
       setMessage('Error al registrar salida. Revisa el backend.')
     } finally {
       setCheckingOut(false)
+      setCapturePhase('idle')
+      setCaptureProgress(0)
     }
   }
 
@@ -703,9 +730,16 @@ export function AttendanceMarker() {
 
   const showCameraOffMessage = !cameraEnabled
   const showOfflineMessage = cameraEnabled && !isOnline
-  const showSyncMessage = cameraEnabled && isOnline && syncingOffline && offlinePendingCount > 0 && !identifying
-  const showProcessingFaceMessage = cameraEnabled && cameraReady && processingFace && !showSyncMessage
-  const showWaitingFaceMessage = cameraEnabled && cameraReady && !processingFace && !showOfflineMessage && !showSyncMessage
+  const showSyncMessage = cameraEnabled && isOnline && syncingOffline && offlinePendingCount > 0 && capturePhase === 'idle'
+  const showProcessingFaceMessage = cameraEnabled && cameraReady && capturePhase !== 'idle' && !showSyncMessage
+  const showWaitingFaceMessage = cameraEnabled && cameraReady && capturePhase === 'idle' && !showOfflineMessage && !showSyncMessage
+
+  const captureOverlayTitle =
+    capturePhase === 'capturing'
+      ? 'Procesando foto...'
+      : capturePhase === 'identifying'
+        ? 'Identificando rostro...'
+        : 'Confirmando...'
 
   const overlayMessage =
     showCameraOffMessage
@@ -735,8 +769,15 @@ export function AttendanceMarker() {
 
   return (
     <div className="space-y-4">
+      <ProcessingOverlay
+        open={capturePhase !== 'idle'}
+        title={captureOverlayTitle}
+        progress={captureProgress}
+        scope="viewport"
+      />
+
       {unrecognizedDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
           <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">
             <div className="h-2 bg-red-500" />
             <div className="p-6">
@@ -764,7 +805,7 @@ export function AttendanceMarker() {
       )}
 
       {identified && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
           <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">
             <div className="h-2 bg-brand-blue" />
             <div className="p-6">
@@ -820,7 +861,7 @@ export function AttendanceMarker() {
       )}
 
       {result && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
           <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">
             <div className={['h-2', result.variant === 'success' ? 'bg-emerald-500' : 'bg-amber-500'].join(' ')} />
             <div className="p-6">
@@ -847,7 +888,7 @@ export function AttendanceMarker() {
       )}
 
       {passwordFallbackOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
           <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">
             <div className="h-2 bg-brand-orange" />
             <div className="p-6">
@@ -924,7 +965,7 @@ export function AttendanceMarker() {
         aria-live="polite"
         className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800"
       >
-        {showSyncMessage || showProcessingFaceMessage ? (
+        {showSyncMessage ? (
           <div className="flex items-center gap-3">
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-brand-blue" aria-hidden="true" />
             <span>{cameraError ?? overlayMessage}</span>
