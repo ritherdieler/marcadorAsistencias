@@ -28,7 +28,7 @@ export function ShellLayout() {
       <div className="pointer-events-none absolute -right-48 bottom-6 h-[520px] w-[520px] rounded-full bg-brand-soft" />
 
       {/* Contenedor centrado */}
-      <div className="relative mx-auto flex min-h-dvh max-w-6xl items-center justify-center px-4 py-10">
+      <div className="relative mx-auto flex min-h-dvh max-w-6xl items-center justify-center px-4 pb-10 pt-16 sm:pt-10">
         {/* Tarjeta central */}
         <div className="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-black/5">
           {/* Tabs superiores */}

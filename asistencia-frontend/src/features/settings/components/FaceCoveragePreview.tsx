@@ -2,41 +2,92 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useCamera } from '../../../hooks/useCamera'
 import { FaceBoxOverlay } from '../../recognition/components/FaceBoxOverlay'
-import { FaceCoverageIndicator } from '../../recognition/components/FaceCoverageIndicator'
+import { FaceLandmarksOverlay } from '../../recognition/components/FaceLandmarksOverlay'
+import { FacePositionGuide } from '../../recognition/components/FacePositionGuide'
 import {
   evaluateFaceAlignment,
+  faceAlignmentDiagnosticMessage,
   faceAlignmentMessage,
   getFaceWidthPercent,
   type FaceAlignment,
 } from '../../recognition/services/faceAlignment'
-import { toRuntimeConfig, type FaceCoverageFlow } from '../../recognition/services/faceAlignmentConfig'
+import {
+  computeMaxWidthPercent,
+  DEFAULT_FACE_COVERAGE_CONFIG,
+  DEFAULT_FACE_GUIDE_SETTINGS,
+  DEFAULT_FACE_LANDMARK_LAYERS,
+  toRuntimeConfig,
+  type FaceCoverageFlow,
+  type FaceCoverageSettings,
+  type FaceGuideSettings,
+  type FaceLandmarkAlignmentColors,
+  type FaceLandmarkDrawStyle,
+  type FaceLandmarkLayers,
+} from '../../recognition/services/faceAlignmentConfig'
 
-import { detectVisibleFacePose, type FaceBox } from '../../recognition/services/facePresenceDetector'
+import { detectVisibleFacePose, type FaceBox, type FaceLandmarkPoint } from '../../recognition/services/facePresenceDetector'
 
 type FaceCoveragePreviewProps = {
   activeFlow: FaceCoverageFlow
-  targetWidthPercent: number
+  flowSettings: FaceCoverageSettings
+  showFaceLandmarks: boolean
+  showFaceBox: boolean
+  faceGuide: FaceGuideSettings
+  landmarkDrawStyle: FaceLandmarkDrawStyle
+  landmarkPointSizePx: number
+  landmarkAlignmentColors: FaceLandmarkAlignmentColors
+  landmarkLayers: FaceLandmarkLayers
 }
 
 const DETECT_INTERVAL_MS = 280
 
-function buildDraftRuntimeConfig(activeFlow: FaceCoverageFlow, targetWidthPercent: number) {
+function buildDraftRuntimeConfig(activeFlow: FaceCoverageFlow, flowSettings: FaceCoverageSettings) {
   return toRuntimeConfig(activeFlow, {
-    attendance: { targetWidthPercent },
-    registration: { targetWidthPercent },
+    attendance:
+      activeFlow === 'attendance'
+        ? flowSettings
+        : { ...DEFAULT_FACE_COVERAGE_CONFIG.attendance },
+    registration:
+      activeFlow === 'registration'
+        ? flowSettings
+        : { ...DEFAULT_FACE_COVERAGE_CONFIG.registration },
+    showFaceLandmarks: true,
+    showFaceBox: false,
+    faceGuide: { ...DEFAULT_FACE_GUIDE_SETTINGS },
+    landmarkDrawStyle: 'continuous',
+    landmarkPointSizePx: 3,
+    landmarkAlignmentColors: { ...DEFAULT_FACE_COVERAGE_CONFIG.landmarkAlignmentColors },
+    landmarkLayers: { ...DEFAULT_FACE_LANDMARK_LAYERS },
   })
 }
 
-export function FaceCoveragePreview({ activeFlow, targetWidthPercent }: FaceCoveragePreviewProps) {
+export function FaceCoveragePreview({
+  activeFlow,
+  flowSettings,
+  showFaceLandmarks,
+  showFaceBox,
+  faceGuide,
+  landmarkDrawStyle,
+  landmarkPointSizePx,
+  landmarkAlignmentColors,
+  landmarkLayers,
+}: FaceCoveragePreviewProps) {
   const { videoRef, stream, error: cameraError, permissionDenied, start } = useCamera()
   const [faceBox, setFaceBox] = useState<FaceBox | null>(null)
+  const [landmarks, setLandmarks] = useState<FaceLandmarkPoint[] | null>(null)
   const [alignment, setAlignment] = useState<FaceAlignment>('searching')
   const [statusMessage, setStatusMessage] = useState('Activando camara...')
   const checkingRef = useRef(false)
 
+  const targetWidthPercent = flowSettings.targetWidthPercent
+  const maxTargetWidthPercent = computeMaxWidthPercent(
+    flowSettings.targetWidthPercent,
+    flowSettings.upperWidthRatio,
+  )
+
   const runtimeConfig = useMemo(
-    () => buildDraftRuntimeConfig(activeFlow, targetWidthPercent),
-    [activeFlow, targetWidthPercent],
+    () => buildDraftRuntimeConfig(activeFlow, flowSettings),
+    [activeFlow, flowSettings],
   )
 
   useEffect(() => {
@@ -60,30 +111,17 @@ export function FaceCoveragePreview({ activeFlow, targetWidthPercent }: FaceCove
 
         if (!result.visible || !result.box) {
           setFaceBox(null)
+          setLandmarks(result.landmarks ?? null)
           setAlignment('searching')
           setStatusMessage('Coloca tu rostro frente a la camara para probar el umbral.')
           return
         }
 
         setFaceBox(result.box)
+        setLandmarks(result.landmarks ?? null)
         const quality = evaluateFaceAlignment(result.box, result.pose, null, runtimeConfig)
         setAlignment(quality)
-        const widthPercent = getFaceWidthPercent(result.box)
-
-        if (quality === 'aligned') {
-          setStatusMessage(
-            `Rostro al ${widthPercent}% de ancho. Con umbral ${targetWidthPercent}%: posicion valida para ${activeFlow === 'attendance' ? 'marcar' : 'registrar'}.`,
-          )
-          return
-        }
-
-        setStatusMessage(
-          faceAlignmentMessage(
-            quality,
-            { widthPercent, targetPercent: targetWidthPercent },
-            targetWidthPercent,
-          ),
-        )
+        setStatusMessage(faceAlignmentMessage(quality))
       } finally {
         checkingRef.current = false
       }
@@ -96,16 +134,25 @@ export function FaceCoveragePreview({ activeFlow, targetWidthPercent }: FaceCove
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [activeFlow, runtimeConfig, stream, targetWidthPercent, videoRef])
+  }, [runtimeConfig, stream, videoRef])
 
   const widthPercent = getFaceWidthPercent(faceBox)
+  const diagnosticLine =
+    faceBox !== null
+      ? faceAlignmentDiagnosticMessage(
+          alignment,
+          { widthPercent, targetPercent: targetWidthPercent, maxTargetPercent: maxTargetWidthPercent },
+          targetWidthPercent,
+          maxTargetWidthPercent,
+        )
+      : `Ancho detectado: — · Banda: ${targetWidthPercent}–${maxTargetWidthPercent}% · ratio ${flowSettings.upperWidthRatio.toFixed(2)}x`
 
   return (
     <div className="space-y-4">
       <div>
         <h2 className="text-lg font-bold text-slate-950">Vista previa en vivo</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Mueve el slider y observa como cambia la linea objetivo y la validacion del rostro.
+          Ajusta objetivo, tolerancia y guia visual; la linea de diagnostico solo aparece aqui en admin.
         </p>
       </div>
 
@@ -113,8 +160,23 @@ export function FaceCoveragePreview({ activeFlow, targetWidthPercent }: FaceCove
         <video ref={videoRef} className="aspect-video w-full object-cover" playsInline muted autoPlay />
         {stream && !permissionDenied && (
           <>
-            <FaceBoxOverlay box={faceBox} alignment={alignment} />
-            <FaceCoverageIndicator widthPercent={widthPercent} alignment={alignment} targetPercent={targetWidthPercent} />
+            <FacePositionGuide
+              alignment={alignment}
+              faceBox={faceBox}
+              runtimeConfig={runtimeConfig}
+              faceGuide={faceGuide}
+            />
+            <FaceBoxOverlay box={faceBox} showFaceBox={showFaceBox} alignment={alignment} />
+            {showFaceLandmarks && (
+              <FaceLandmarksOverlay
+                landmarks={landmarks}
+                alignment={alignment}
+                landmarkLayers={landmarkLayers}
+                landmarkDrawStyle={landmarkDrawStyle}
+                landmarkPointSizePx={landmarkPointSizePx}
+                landmarkAlignmentColors={landmarkAlignmentColors}
+              />
+            )}
           </>
         )}
         {permissionDenied && (
@@ -123,6 +185,8 @@ export function FaceCoveragePreview({ activeFlow, targetWidthPercent }: FaceCove
           </div>
         )}
       </div>
+
+      <p className="text-xs font-medium tabular-nums text-slate-500">{diagnosticLine}</p>
 
       <div
         role="status"

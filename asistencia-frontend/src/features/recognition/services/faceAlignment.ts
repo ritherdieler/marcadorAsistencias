@@ -13,6 +13,7 @@ export type FaceAlignment =
 export type FaceAlignmentMessageOptions = {
   widthPercent?: number
   targetPercent?: number
+  maxTargetPercent?: number
   poseInstruction?: string
 }
 
@@ -31,8 +32,8 @@ export function evaluateFaceAlignment(
   if (box.width < config.minFaceWidth) return 'too_far'
   if (box.width > config.maxFaceWidth) return 'too_close'
 
-  const tolerance =
-    expectedPose && expectedPose !== 'front' ? config.centerToleranceTurn : config.centerToleranceFront
+  const useTurnTolerance = Boolean(expectedPose && expectedPose !== 'front')
+  const tolerance = useTurnTolerance ? config.centerToleranceTurn : config.centerToleranceFront
   const offCenterX = Math.abs(box.centerX - 0.5) > tolerance
   const offCenterY = Math.abs(box.centerY - config.centerTargetY) > tolerance + 0.06
   if (offCenterX || offCenterY) return 'off_center'
@@ -41,33 +42,71 @@ export function evaluateFaceAlignment(
   return 'aligned'
 }
 
-function widthPrefix(options: FaceAlignmentMessageOptions, fallbackTarget: number): string {
+export function evaluateFaceDistance(
+  box: FaceBox,
+  config: FaceAlignmentRuntimeConfig,
+): 'too_far' | 'too_close' | 'aligned' {
+  if (box.width < config.minFaceWidth) return 'too_far'
+  if (box.width > config.maxFaceWidth) return 'too_close'
+  return 'aligned'
+}
+
+export function evaluateChallengeAlignmentGate(
+  box: FaceBox,
+  pose: FacePose,
+  config: FaceAlignmentRuntimeConfig,
+  progress: { stage: string; turnPhase: 'await_turn' | 'await_center' | null; turnCycleAssigned: boolean },
+): FaceAlignment {
+  const turningHead =
+    progress.stage === 'turn' && progress.turnPhase === 'await_turn' && progress.turnCycleAssigned
+
+  if (turningHead) {
+    return evaluateFaceDistance(box, config)
+  }
+
+  return evaluateFaceAlignment(box, pose, null, config)
+}
+
+function widthPrefix(options: FaceAlignmentMessageOptions, fallbackTarget: number, fallbackMax?: number): string {
   if (options.widthPercent === undefined) return ''
   const target = options.targetPercent ?? fallbackTarget
-  return `Rostro al ${options.widthPercent}% de ancho. Objetivo: ${target}%. `
+  const maxTarget = options.maxTargetPercent ?? fallbackMax
+  const band =
+    maxTarget !== undefined && maxTarget > target ? `${target}–${maxTarget}%` : `${target}%`
+  return `Rostro al ${options.widthPercent}% de ancho. Banda: ${band}. `
 }
 
 export function faceAlignmentMessage(
   alignment: FaceAlignment,
   options?: FaceAlignmentMessageOptions | string,
-  fallbackTarget = DEFAULT_REGISTRATION_RUNTIME_CONFIG.targetWidthPercent,
 ): string {
   const opts: FaceAlignmentMessageOptions =
     typeof options === 'string' ? { poseInstruction: options } : (options ?? {})
-  const prefix = widthPrefix(opts, fallbackTarget)
 
   switch (alignment) {
     case 'too_far':
-      return `${prefix}Acercate un poco a la camara.`
+      return 'Acercate un poco'
     case 'too_close':
-      return `${prefix}Alejate un poco de la camara.`
+      return 'Alejate un poco'
     case 'off_center':
-      return `${prefix}Centra tu rostro dentro del marco.`
+      return 'Centra tu rostro en el marco'
     case 'wrong_pose':
-      return `${prefix}${opts.poseInstruction ?? 'Ajusta la posicion del rostro.'}`
+      return opts.poseInstruction ?? 'Ajusta la posicion del rostro'
     case 'searching':
-      return 'Coloca tu rostro dentro del marco.'
+      return 'Coloca tu rostro dentro del marco'
     default:
-      return prefix ? `${prefix}Posicion correcta.` : 'Posicion correcta.'
+      return 'Perfecto, manten la posicion'
   }
+}
+
+export function faceAlignmentDiagnosticMessage(
+  alignment: FaceAlignment,
+  options: FaceAlignmentMessageOptions,
+  fallbackTarget = DEFAULT_REGISTRATION_RUNTIME_CONFIG.targetWidthPercent,
+  fallbackMax = DEFAULT_REGISTRATION_RUNTIME_CONFIG.maxTargetWidthPercent,
+): string {
+  const prefix = widthPrefix(options, fallbackTarget, fallbackMax)
+  const userMessage = faceAlignmentMessage(alignment, options)
+  if (!prefix) return userMessage
+  return `${prefix.trim()} ${userMessage}`
 }

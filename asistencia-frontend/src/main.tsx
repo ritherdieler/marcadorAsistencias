@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom'
 
 import App from './App'
 import './assets/app.css'
+import { NetworkStatusProvider } from './hooks/useNetworkStatus'
 import { ensureLocalDataReset } from './services/localAppData'
 
 const queryClient = new QueryClient()
@@ -15,7 +16,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <App />
+        <NetworkStatusProvider>
+          <App />
+        </NetworkStatusProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>,

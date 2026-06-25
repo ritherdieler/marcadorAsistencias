@@ -1,19 +1,54 @@
-import axios from 'axios' // Librería HTTP
+import axios from 'axios'
 
-import { env } from '../utils/env' // Variables de entorno (VITE_*)
+import { env } from '../utils/env'
 
+type ConnectionReporter = {
+  onError: () => void
+  onSuccess: () => void
+}
+
+let connectionReporter: ConnectionReporter | null = null
+
+export function registerConnectionReporter(reporter: ConnectionReporter | null) {
+  connectionReporter = reporter
+}
+
+function isNetworkFailure(error: unknown): boolean {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return true
+
+  if (typeof error === 'object' && error !== null) {
+    const axiosError = error as { code?: string; response?: unknown; request?: unknown }
+    return Boolean(axiosError.request && !axiosError.response)
+      || axiosError.code === 'ERR_NETWORK'
+      || axiosError.code === 'ECONNABORTED'
+  }
+
+  return false
+}
 
 const http = axios.create({
-  baseURL: env.apiBaseUrl ?? 'http://localhost:8080/ispadmin', // Por defecto: puerto 8080 + context-path /ispadmin (según tu application.properties)
-  timeout: 20000, // Timeout de red (ms) ip: 212.85.13.47
-  withCredentials: true, // Soporta autenticación por cookies/sesión si tu backend la usa
+  baseURL: env.apiBaseUrl ?? 'http://localhost:8080/ispadmin',
+  timeout: 20000,
+  withCredentials: true,
 })
-
 
 http.interceptors.request.use((config) => {
-  const token = localStorage.getItem('auth_token') // Token JWT (si tu backend entrega Bearer)
-  if (token) config.headers.Authorization = `Bearer ${token}` // Inyecta Authorization automáticamente
-  return config // Devuelve la config para continuar con la petición
+  const token = localStorage.getItem('auth_token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
 })
 
-export { http } // Exporta cliente HTTP reutilizable
+http.interceptors.response.use(
+  (response) => {
+    connectionReporter?.onSuccess()
+    return response
+  },
+  (error) => {
+    if (isNetworkFailure(error)) {
+      connectionReporter?.onError()
+    }
+    return Promise.reject(error)
+  },
+)
+
+export { http }

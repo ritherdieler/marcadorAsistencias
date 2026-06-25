@@ -37,7 +37,7 @@ Kotlin binding: `FaceRecognitionProperties` + `FaceRecognitionConfiguration`.
 | `detector.confidence-threshold` | 0.70 |
 | `detector.nms-threshold` | 0.45 |
 | `detector.face-margin-ratio` | 0.20 |
-| `detector.min-face-width-ratio` | 0.15 |
+| `detector.min-face-width-ratio` | 0.20 (was 0.15 — stricter to reject distant/small faces) |
 
 ### Pre-upload quality gate
 
@@ -53,12 +53,35 @@ Kotlin binding: `FaceRecognitionProperties` + `FaceRecognitionConfiguration`.
 
 | Property | Value | Usage |
 |----------|-------|-------|
-| `matching.photo-similarity-threshold` | 0.78 | Online photo identify/verify |
-| `matching.photo-min-margin` | 0.03 | Margin vs 2nd best **user** (not global embedding) |
-| `matching.offline-threshold` | 0.82 | Offline dataset endpoint |
-| `matching.offline-min-margin` | 0.04 | Offline margin vs 2nd best user |
+| `matching.photo-similarity-threshold` | 0.82 (was 0.78) | Online photo identify/verify |
+| `matching.photo-min-margin` | 0.06 (was 0.03) | Margin vs 2nd best **user** (not global embedding) |
+| `matching.offline-threshold` | 0.84 (was 0.82) | Offline dataset endpoint |
+| `matching.offline-min-margin` | 0.06 (was 0.04) | Offline margin vs 2nd best user |
 | `matching.euclidean-threshold` | 0.48 | Legacy JSON descriptor endpoints |
 | `matching.cache-ttl-ms` | 60000 | Embedding cache TTL |
+
+> **Camino A (tuning 2026-06-24):** raised the similarity threshold and (especially) the
+> inter-user margin to reduce misidentifications between similar faces. Higher margin means the
+> system abstains (returns "no reconocido") when the top two users are too close, instead of
+> guessing. Re-calibrate using the structured metrics file (see precision doc).
+
+### Embedding model (swappable) — `face.embedding.*`
+
+Kotlin binding: `FaceEmbeddingProperties`. Default reproduces the current PyTorch model exactly.
+
+| Property | Default | Notes |
+|----------|---------|-------|
+| `engine` | `PyTorch` | `PyTorch` (current) or `OnnxRuntime` (ArcFace) |
+| `model-path` | `classpath:models/face_feature.zip` | ArcFace: `classpath:models/arcface_w600k_mbf.onnx` |
+| `model-name` | `face_feature` | |
+| `input-size` | `224` | ArcFace: `112` |
+| `alignment` | `LEGACY` | `LEGACY` (eye-distance) or `ARCFACE` (5-point Umeyama) |
+| `normalize` | `0.498,...,0.502,...` | ArcFace: `0.5,0.5,0.5,0.5,0.5,0.5` |
+| `metric` | `COSINE_SIMILARITY` | |
+| `l2-normalize` | `false` | ArcFace: `true` recommended |
+
+Switching to ArcFace is **destructive** (invalidates all stored embeddings → everyone re-enrolls).
+See `face-recognition-precision-improvements.md`.
 
 Matching groups embeddings by `userId` and keeps the best score per user (max across FRONT/LEFT/RIGHT templates). The safety margin compares the top user against the second-best **user**, avoiding false rejections when another angle of the same person ranks second.
 
@@ -88,21 +111,23 @@ Shared goal: detect → align → embed → compare per user.
 
 Web offline descriptor generation: [`src/services/localFaceDescriptor.ts`](../src/services/localFaceDescriptor.ts)
 
-- MediaPipe BlazeFace detection + estimated landmark alignment (same geometry as backend)
-- Margin-based detected crops + center-crop fallbacks
+- MediaPipe Face Landmarker (`detectFromImage`) + 5-point ArcFace alignment via [`faceLandmarkMapping.ts`](../src/features/recognition/services/faceLandmarkMapping.ts)
+- Center-crop fallbacks when no face is detected
 - Lighting variants for low-light robustness
 
-## Offline web inference alignment
-
-- Detector min confidence: `0.70` (`FACE_OFFLINE_DETECTOR_MIN_CONFIDENCE`)
-- Center crop specs match backend fallback crops in `FACE_OFFLINE_CENTER_CROP_SPECS`
-- ONNX model input: 224×224, normalization `(pixel - 127.5) / 128`, 512-d embedding
+See also: [`face-vision-unified.md`](face-vision-unified.md)
 
 ## Build verification (2026-06-23)
 
 - Backend: `bash mvnw compile -DskipTests` — OK (landmark alignment + user-level matching)
 - Web: `npm run build` — OK (unified offline preprocess + user-level offline match)
 - Android: `./gradlew :presentation:compileDevDebugSources` — OK (prior session)
+
+## Build verification (2026-06-24 — precision C/A/E)
+
+- Backend: `sh mvnw -q -DskipTests compile` — OK (structured metrics logging + tuning + swappable ArcFace/ONNX engine + admin reset/inventory)
+- Web: `npx tsc --noEmit` — OK (configurable embedding model params; default behavior unchanged)
+- Android: `./gradlew :presentation:compileDevDebugSources` — **FAILED on pre-existing, unrelated errors** in `RegisterSubscriptionComposeViewModel.kt` / `RegisterSubscriptionScreen.kt` (subscription feature mid-refactor). The only face change (photo capture raised to 720px / 88% in `FaceLoginScreen.kt`) is unaffected and not part of the errors.
 
 ## Local data reset
 

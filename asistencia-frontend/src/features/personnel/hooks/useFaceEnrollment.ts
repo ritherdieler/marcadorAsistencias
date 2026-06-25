@@ -4,8 +4,8 @@ import { useCamera } from '../../../hooks/useCamera'
 import { createMonotonicProgress } from '../../../utils/monotonicProgress'
 import { yieldToUi } from '../../../utils/yieldToUi'
 import { captureFacePhoto } from '../../recognition/services/cameraEvidence'
-import { detectVisibleFacePose, type FaceBox } from '../../recognition/services/facePresenceDetector'
-import { evaluateFaceAlignment, faceAlignmentMessage, getFaceWidthPercent, type FaceAlignment } from '../../recognition/services/faceAlignment'
+import { detectVisibleFacePose, type FaceBox, type FaceLandmarkPoint } from '../../recognition/services/facePresenceDetector'
+import { evaluateFaceAlignment, faceAlignmentMessage, type FaceAlignment } from '../../recognition/services/faceAlignment'
 import { useFaceCoverageConfig } from '../../recognition/hooks/useFaceCoverageConfig'
 
 export type CaptureAngle = 'front' | 'left' | 'right'
@@ -46,13 +46,23 @@ interface UseFaceEnrollmentOptions {
 }
 
 export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOptions) {
-  const { getRuntimeConfig } = useFaceCoverageConfig()
+  const {
+    getRuntimeConfig,
+    showFaceLandmarks,
+    showFaceBox,
+    faceGuide,
+    landmarkDrawStyle,
+    landmarkPointSizePx,
+    landmarkAlignmentColors,
+    landmarkLayers,
+  } = useFaceCoverageConfig()
   const alignmentConfig = getRuntimeConfig('registration')
   const { videoRef, stream, error: cameraError, permissionDenied, start, stop } = useCamera()
 
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [deviceId, setDeviceId] = useState<string | null>(null)
   const [faceBox, setFaceBox] = useState<FaceBox | null>(null)
+  const [landmarks, setLandmarks] = useState<FaceLandmarkPoint[] | null>(null)
   const [alignment, setAlignment] = useState<FaceAlignment>('searching')
   const [currentAngle, setCurrentAngle] = useState<CaptureAngle>('front')
   const [captures, setCaptures] = useState<Record<CaptureAngle, AngleCaptureState>>(emptyCaptures)
@@ -135,6 +145,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
     if (!active) {
       stop()
       setFaceBox(null)
+      setLandmarks(null)
       setAlignment('searching')
       setCountdown(null)
       alignedSinceRef.current = null
@@ -172,6 +183,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
 
         if (!result.visible || !result.box) {
           setFaceBox(result.box ?? null)
+          setLandmarks(result.landmarks ?? null)
           setAlignment('searching')
           alignedSinceRef.current = null
           setCountdown(null)
@@ -180,6 +192,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
         }
 
         setFaceBox(result.box)
+        setLandmarks(result.landmarks ?? null)
         const angle = currentAngleRef.current
         const quality = evaluateFaceAlignment(result.box, result.pose, angle, alignmentConfig)
         setAlignment(quality)
@@ -188,31 +201,16 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
           alignedSinceRef.current = null
           setCountdown(null)
           setStatusMessage(
-            faceAlignmentMessage(
-              quality,
-              {
-                widthPercent: getFaceWidthPercent(result.box),
-                targetPercent: alignmentConfig.targetWidthPercent,
-                poseInstruction: angleInstruction(angle),
-              },
-              alignmentConfig.targetWidthPercent,
-            ),
+            faceAlignmentMessage(quality, {
+              poseInstruction: angleInstruction(angle),
+            }),
           )
           return
         }
 
         if (!autoCaptureRef.current) {
           setCountdown(null)
-          setStatusMessage(
-            faceAlignmentMessage(
-              'aligned',
-              {
-                widthPercent: getFaceWidthPercent(result.box),
-                targetPercent: alignmentConfig.targetWidthPercent,
-              },
-              alignmentConfig.targetWidthPercent,
-            ),
-          )
+          setStatusMessage(faceAlignmentMessage('aligned'))
           return
         }
 
@@ -222,9 +220,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
         const remaining = Math.max(0, ALIGN_HOLD_MS - elapsed)
         const tick = Math.ceil(remaining / 500)
         setCountdown(tick > 0 ? tick : null)
-        setStatusMessage(
-          `Rostro al ${getFaceWidthPercent(result.box)}% de ancho. Manten la posicion...`,
-        )
+        setStatusMessage('Perfecto, manten la posicion...')
 
         if (elapsed >= ALIGN_HOLD_MS) {
           await doCapture(video, angle)
@@ -232,6 +228,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
       } catch {
         if (!cancelled) {
           setFaceBox(null)
+          setLandmarks(null)
           setAlignment('searching')
         }
       } finally {
@@ -295,6 +292,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
     setCountdown(null)
     setAlignment('searching')
     setFaceBox(null)
+    setLandmarks(null)
   }, [releasePreviews])
 
   const capturedCount = useMemo(
@@ -319,6 +317,13 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
     devices,
     deviceId,
     faceBox,
+    landmarks,
+    showFaceLandmarks,
+    showFaceBox,
+    landmarkDrawStyle,
+    landmarkPointSizePx,
+    landmarkAlignmentColors,
+    landmarkLayers,
     alignment,
     currentAngle,
     captures,
@@ -330,6 +335,8 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
     isComplete,
     canManualCapture,
     targetWidthPercent: alignmentConfig.targetWidthPercent,
+    runtimeConfig: alignmentConfig,
+    faceGuide,
     selectDevice,
     retryCamera,
     manualCapture,

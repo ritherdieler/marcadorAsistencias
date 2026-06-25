@@ -3,10 +3,18 @@ import type { RefObject } from 'react'
 import { Alert } from '../../../../components/ui/Alert'
 import { ProcessingOverlay } from '../../../../components/ui/ProcessingOverlay'
 import { FaceBoxOverlay } from '../../../recognition/components/FaceBoxOverlay'
-import { FaceCoverageIndicator } from '../../../recognition/components/FaceCoverageIndicator'
+import { FaceLandmarksOverlay } from '../../../recognition/components/FaceLandmarksOverlay'
+import { FacePositionGuide } from '../../../recognition/components/FacePositionGuide'
 import type { FaceAlignment } from '../../../recognition/services/faceAlignment'
-import { getFaceWidthPercent } from '../../../recognition/services/faceAlignment'
-import type { FaceBox } from '../../../recognition/services/facePresenceDetector'
+import type {
+  FaceAlignmentRuntimeConfig,
+  FaceGuideSettings,
+  FaceLandmarkAlignmentColors,
+  FaceLandmarkDrawStyle,
+  FaceLandmarkLayers,
+} from '../../../recognition/services/faceAlignmentConfig'
+import { DEFAULT_FACE_COVERAGE_CONFIG, DEFAULT_FACE_LANDMARK_LAYERS } from '../../../recognition/services/faceAlignmentConfig'
+import type { FaceBox, FaceLandmarkPoint } from '../../../recognition/services/facePresenceDetector'
 import { CaptureCountdown } from './CaptureCountdown'
 
 type CameraStageProps = {
@@ -14,6 +22,13 @@ type CameraStageProps = {
   active: boolean
   mirror?: boolean
   faceBox: FaceBox | null
+  landmarks?: FaceLandmarkPoint[] | null
+  showFaceLandmarks?: boolean
+  showFaceBox?: boolean
+  landmarkDrawStyle?: FaceLandmarkDrawStyle
+  landmarkPointSizePx?: number
+  landmarkAlignmentColors?: FaceLandmarkAlignmentColors
+  landmarkLayers?: FaceLandmarkLayers
   alignment: FaceAlignment
   countdown: number | null
   capturing: boolean
@@ -24,7 +39,8 @@ type CameraStageProps = {
   onRetry: () => void
   devices: MediaDeviceInfo[]
   deviceId: string | null
-  targetWidthPercent?: number
+  runtimeConfig: FaceAlignmentRuntimeConfig
+  faceGuide: FaceGuideSettings
   onSelectDevice: (id: string) => void
 }
 
@@ -39,6 +55,13 @@ export function CameraStage({
   active,
   mirror = false,
   faceBox,
+  landmarks,
+  showFaceLandmarks = true,
+  showFaceBox = false,
+  landmarkDrawStyle = 'continuous',
+  landmarkPointSizePx = 3,
+  landmarkAlignmentColors = DEFAULT_FACE_COVERAGE_CONFIG.landmarkAlignmentColors,
+  landmarkLayers = DEFAULT_FACE_LANDMARK_LAYERS,
   alignment,
   countdown,
   capturing,
@@ -49,7 +72,8 @@ export function CameraStage({
   onRetry,
   devices,
   deviceId,
-  targetWidthPercent,
+  runtimeConfig,
+  faceGuide,
   onSelectDevice,
 }: CameraStageProps) {
   const showVideo = active && !permissionDenied
@@ -70,12 +94,27 @@ export function CameraStage({
           />
         )}
 
-        {showVideo && <FaceBoxOverlay box={faceBox} alignment={alignment} mirror={mirror} />}
         {showVideo && (
-          <FaceCoverageIndicator
-            widthPercent={getFaceWidthPercent(faceBox)}
+          <FacePositionGuide
             alignment={alignment}
-            targetPercent={targetWidthPercent}
+            faceBox={faceBox}
+            runtimeConfig={runtimeConfig}
+            faceGuide={faceGuide}
+            mirror={mirror}
+          />
+        )}
+        {showVideo && (
+          <FaceBoxOverlay box={faceBox} showFaceBox={showFaceBox} alignment={alignment} mirror={mirror} />
+        )}
+        {showVideo && showFaceLandmarks && (
+          <FaceLandmarksOverlay
+            landmarks={landmarks}
+            alignment={alignment}
+            mirror={mirror}
+            landmarkLayers={landmarkLayers}
+            landmarkDrawStyle={landmarkDrawStyle}
+            landmarkPointSizePx={landmarkPointSizePx}
+            landmarkAlignmentColors={landmarkAlignmentColors}
           />
         )}
         {showVideo && <CaptureCountdown value={countdown} />}

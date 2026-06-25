@@ -3,26 +3,36 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { LoadingButton } from '../../../components/ui/LoadingButton'
 import { ProcessingOverlay } from '../../../components/ui/ProcessingOverlay'
 import { useCamera } from '../../../hooks/useCamera'
+import { useNetworkStatus } from '../../../hooks/useNetworkStatus'
 import {
   enqueueOfflineAttendance,
-  getOfflineAttendanceCount,
   isConnectionError,
   syncOfflineAttendanceQueue,
 } from '../../../services/offlineAttendanceQueue'
-import { forgetLocalCheckIn, hasLocalCheckIn, rememberLocalCheckIn } from '../../../services/localAttendanceState'
-import { findBestOfflineFaceMatch, getOfflineFaceDataset, refreshOfflineFaceDataset } from '../../../services/offlineFaceDataset'
-import { generateLocalFaceDescriptorCandidates } from '../../../services/localFaceDescriptor'
-import { identifyFacePhoto, saveFaceEvidencePhoto, verifyAttendanceWithPassword, verifyFacePhoto } from '../../../services/recognitionService'
+import { identifyCapturedFace } from '../../../services/faceIdentityService'
+import { forgetLocalCheckIn, rememberLocalCheckIn } from '../../../services/localAttendanceState'
+import { refreshOfflineFaceDataset } from '../../../services/offlineFaceDataset'
+import { saveFaceEvidencePhoto, startFaceChallenge, verifyAttendanceWithPassword, verifyFacePhoto } from '../../../services/recognitionService'
 import type { User } from '../../../types/user'
 import { formatUserRole } from '../../../utils/userRole'
 import { captureFacePhoto } from '../../recognition/services/cameraEvidence'
 import { FaceBoxOverlay } from '../../recognition/components/FaceBoxOverlay'
-import { FaceCoverageIndicator } from '../../recognition/components/FaceCoverageIndicator'
-import { detectVisibleFacePose, type FaceBox } from '../../recognition/services/facePresenceDetector'
+import { FaceLandmarksOverlay } from '../../recognition/components/FaceLandmarksOverlay'
+import { FacePositionGuide } from '../../recognition/components/FacePositionGuide'
+import { detectVisibleFacePose, type FaceBox, type FaceLandmarkPoint } from '../../recognition/services/facePresenceDetector'
 import {
+  createActiveFaceChallenge,
+  challengePromptForType,
+  type ActiveFaceChallenge,
+  type FaceChallengeType,
+} from '../../recognition/services/activeFaceChallenge'
+import { pickRandomChallengeType } from '../../recognition/services/faceChallengeConfig'
+import { detectBlinkCycle, readBlinkScores, type BlinkScores } from '../../recognition/services/faceBlendshapeUtils'
+import { useFaceChallengeConfig } from '../../recognition/hooks/useFaceChallengeConfig'
+import {
+  evaluateChallengeAlignmentGate,
   evaluateFaceAlignment,
   faceAlignmentMessage,
-  getFaceWidthPercent,
   type FaceAlignment,
 } from '../../recognition/services/faceAlignment'
 import { useFaceCoverageConfig } from '../../recognition/hooks/useFaceCoverageConfig'
@@ -48,7 +58,6 @@ type IdentifiedPerson = {
 
 
 const FACE_LOST_CLEAR_MS = 900
-const IDENTIFICATION_STALE_MS = 5000
 const FACE_CENTER_SHIFT_THRESHOLD = 0.18
 const FACE_SIZE_CHANGE_THRESHOLD = 0.45
 
@@ -69,20 +78,43 @@ function didFaceChangeSignificantly(previous: FaceBox | null, current?: FaceBox)
 }
 
 export function AttendanceMarker() {
-  const { getRuntimeConfig } = useFaceCoverageConfig()
+  const {
+    getRuntimeConfig,
+    showFaceLandmarks,
+    showFaceBox,
+    faceGuide,
+    landmarkDrawStyle,
+    landmarkPointSizePx,
+    landmarkAlignmentColors,
+    landmarkLayers,
+  } = useFaceCoverageConfig()
   const alignmentConfig = getRuntimeConfig('attendance')
+  const { config: challengeConfig, enabled: challengeEnabled } = useFaceChallengeConfig()
   const { videoRef, start, stop, stream, error: cameraError } = useCamera()
+  const {
+    isOnline,
+    isSyncing,
+    pendingSyncCount,
+    refreshPendingSyncCount,
+    setSyncing,
+    reportConnectionError,
+  } = useNetworkStatus()
 
   const [cameraReady, setCameraReady] = useState(false)
   const [cameraEnabled, setCameraEnabled] = useState(false)
-  const [isOnline, setIsOnline] = useState(navigator.onLine)
-  const offlinePendingCountRef = useRef(0)
+  const pendingSyncCountRef = useRef(0)
   const identityAttemptRef = useRef(0)
   const lastFaceBoxRef = useRef<FaceBox | null>(null)
   const faceMissingSinceRef = useRef<number | null>(null)
-  const identityConfirmedAtRef = useRef<number | null>(null)
+  const challengeRef = useRef<ActiveFaceChallenge | null>(null)
+  const challengeTokenRef = useRef<string | null>(null)
+  const challengeTypeRef = useRef<FaceChallengeType>('LEFT_TURN')
+  const challengePassedRef = useRef(false)
+  const blinkHistoryRef = useRef<BlinkScores[]>([])
   const [status, setStatus] = useState('Camara apagada')
+  const [identifiedPreviewUrl, setIdentifiedPreviewUrl] = useState<string | null>(null)
   const [faceBox, setFaceBox] = useState<FaceBox | null>(null)
+  const [landmarks, setLandmarks] = useState<FaceLandmarkPoint[] | null>(null)
   const [alignment, setAlignment] = useState<FaceAlignment>('searching')
   const [message, setMessage] = useState<string | null>(null)
   const [messageType, setMessageType] = useState<'info' | 'error'>('info')
@@ -94,18 +126,81 @@ export function AttendanceMarker() {
   const [captureProgress, setCaptureProgress] = useState(0)
   const [confirming, setConfirming] = useState(false)
   const [checkingOut, setCheckingOut] = useState(false)
-  const [offlinePendingCount, setOfflinePendingCount] = useState(0)
-  const [syncingOffline, setSyncingOffline] = useState(false)
   const [passwordFallbackOpen, setPasswordFallbackOpen] = useState(false)
   const [fallbackUsername, setFallbackUsername] = useState('')
   const [fallbackPassword, setFallbackPassword] = useState('')
   const [fallbackLoading, setFallbackLoading] = useState(false)
+  const [challengeDone, setChallengeDone] = useState(false)
+  const [challengePrompt, setChallengePrompt] = useState('Centra tu rostro y mira a la camara')
+  const [backendChallengeEnabled, setBackendChallengeEnabled] = useState(false)
+
+  const effectiveLivenessRequired = challengeEnabled || (backendChallengeEnabled && isOnline)
+
+  const resetChallenge = useCallback(
+    (backendEnabledOverride?: boolean, preserveTurnType = false) => {
+      const backendOn = backendEnabledOverride ?? backendChallengeEnabled
+      const livenessRequired = challengeEnabled || (backendOn && isOnline)
+      if (!preserveTurnType) {
+        challengeTypeRef.current = pickRandomChallengeType()
+      }
+      challengeRef.current = null
+      challengeTokenRef.current = null
+      blinkHistoryRef.current = []
+      challengePassedRef.current = !livenessRequired
+      setChallengeDone(!livenessRequired)
+      setChallengePrompt(
+        livenessRequired
+          ? challengePromptForType(challengeTypeRef.current, challengeConfig)
+          : 'Coloca tu rostro frente a la camara',
+      )
+    },
+    [backendChallengeEnabled, challengeConfig, challengeEnabled, isOnline],
+  )
+
+  useEffect(() => {
+    challengeRef.current = null
+  }, [challengeConfig])
+
+  const fetchBackendChallengeStatus = useCallback(async (): Promise<boolean> => {
+    if (!navigator.onLine) {
+      setBackendChallengeEnabled(false)
+      return false
+    }
+    try {
+      const challenge = await startFaceChallenge()
+      setBackendChallengeEnabled(challenge.enabled)
+      return challenge.enabled
+    } catch {
+      setBackendChallengeEnabled(false)
+      return false
+    }
+  }, [])
+
+  const requestChallengeToken = useCallback(async () => {
+    if (!navigator.onLine || !backendChallengeEnabled) {
+      challengeTokenRef.current = null
+      return
+    }
+    try {
+      const challenge = await startFaceChallenge()
+      challengeTokenRef.current = challenge.enabled ? challenge.challengeId : null
+    } catch {
+      challengeTokenRef.current = null
+    }
+  }, [backendChallengeEnabled])
+
+  const revokeIdentifiedPreview = useCallback(() => {
+    setIdentifiedPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
+  }, [])
 
   const clearCurrentIdentity = useCallback((clearDialogs = true) => {
     identityAttemptRef.current += 1
     lastFaceBoxRef.current = null
     faceMissingSinceRef.current = null
-    identityConfirmedAtRef.current = null
+    revokeIdentifiedPreview()
     setIdentified(null)
     setIdentifying(false)
     setCapturePhase('idle')
@@ -116,7 +211,47 @@ export function AttendanceMarker() {
       setUnrecognizedDialog(null)
       setResult(null)
     }
-  }, [])
+  }, [revokeIdentifiedPreview])
+
+  const stopCameraStream = useCallback(() => {
+    setCameraReady(false)
+    setCameraEnabled(false)
+    setFaceBox(null)
+    setLandmarks(null)
+    setAlignment('searching')
+    setStatus('Rostro identificado')
+
+    const video = videoRef.current
+    if (video) {
+      video.srcObject = null
+    }
+
+    stop()
+  }, [stop, videoRef])
+
+  const setIdentifiedWithPreview = useCallback((person: IdentifiedPerson) => {
+    setIdentifiedPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return URL.createObjectURL(person.photo)
+    })
+    setIdentified(person)
+    stopCameraStream()
+  }, [stopCameraStream])
+
+  const cancelIdentified = useCallback(() => {
+    clearCurrentIdentity(false)
+    setMessage(null)
+    setCameraEnabled(true)
+  }, [clearCurrentIdentity])
+
+  const handleChallengeRejected = useCallback(() => {
+    // El token expiro o falto: reinicia el reto y vuelve a la camara para repetir el giro.
+    resetChallenge()
+    clearCurrentIdentity(false)
+    setMessageType('error')
+    setMessage('El reto de seguridad expiro. Repite el giro de cabeza para marcar.')
+    setCameraEnabled(true)
+  }, [clearCurrentIdentity, resetChallenge])
 
   const closePasswordFallback = useCallback(() => {
     // Limpia credenciales para que no queden visibles si el modal se vuelve a abrir.
@@ -129,7 +264,9 @@ export function AttendanceMarker() {
     setCameraEnabled(false)
     setCameraReady(false)
     clearCurrentIdentity()
+    resetChallenge()
     setFaceBox(null)
+    setLandmarks(null)
     setAlignment('searching')
     setMessage(null)
     setStatus('Camara apagada')
@@ -140,7 +277,7 @@ export function AttendanceMarker() {
     }
 
     stop()
-  }, [clearCurrentIdentity, stop, videoRef])
+  }, [clearCurrentIdentity, resetChallenge, stop, videoRef])
 
   const retryUnrecognizedFace = useCallback(() => {
     setUnrecognizedDialog(null)
@@ -160,24 +297,25 @@ export function AttendanceMarker() {
     })
   }, [])
 
-  const refreshOfflinePendingCount = useCallback(async () => {
-    // Mantiene visible cuantas marcaciones quedaron pendientes en este navegador.
-    setOfflinePendingCount(await getOfflineAttendanceCount())
-  }, [])
+  useEffect(() => {
+    pendingSyncCountRef.current = pendingSyncCount
+  }, [pendingSyncCount])
 
   useEffect(() => {
-    offlinePendingCountRef.current = offlinePendingCount
-  }, [offlinePendingCount])
+    const url = identifiedPreviewUrl
+    return () => {
+      if (url) URL.revokeObjectURL(url)
+    }
+  }, [identifiedPreviewUrl])
 
   const synchronizeOfflineRecords = useCallback(async () => {
-    // Reintenta enviar al backend las marcaciones guardadas cuando vuelve la conexion.
-    if (!cameraEnabled || !navigator.onLine || syncingOffline || offlinePendingCountRef.current === 0) return
+    if (!cameraEnabled || !isOnline || isSyncing || pendingSyncCountRef.current === 0) return
 
-    setSyncingOffline(true)
+    setSyncing(true)
     try {
       setMessage(null)
       const syncResult = await syncOfflineAttendanceQueue()
-      setOfflinePendingCount(syncResult.remaining)
+      await refreshPendingSyncCount()
       if (syncResult.synced > 0) {
         setMessageType(syncResult.remaining > 0 ? 'error' : 'info')
         setMessage(
@@ -188,12 +326,12 @@ export function AttendanceMarker() {
       }
     } catch (error) {
       if (isConnectionError(error)) {
-        setIsOnline(false)
+        reportConnectionError()
       }
     } finally {
-      setSyncingOffline(false)
+      setSyncing(false)
     }
-  }, [cameraEnabled, syncingOffline])
+  }, [cameraEnabled, isOnline, isSyncing, refreshPendingSyncCount, reportConnectionError, setSyncing])
 
   useEffect(() => {
     if (!cameraEnabled) {
@@ -202,7 +340,11 @@ export function AttendanceMarker() {
       return
     }
 
+    resetChallenge()
+
     ;(async () => {
+      const backendEnabled = await fetchBackendChallengeStatus()
+      resetChallenge(backendEnabled, true)
       setStatus('Activando camara...')
       await start()
       setCameraReady(true)
@@ -211,96 +353,48 @@ export function AttendanceMarker() {
       setMessageType('error')
       setStatus('No se pudo iniciar la camara.')
     })
-  }, [cameraEnabled, start])
+  }, [cameraEnabled, fetchBackendChallengeStatus, resetChallenge, start])
 
   useEffect(() => {
-    void refreshOfflinePendingCount()
+    if (!cameraEnabled) return
 
-    if (cameraEnabled) {
-      void synchronizeOfflineRecords()
-      if (navigator.onLine) {
-        void refreshOfflineFaceDataset().catch(() => undefined)
-      }
+    void synchronizeOfflineRecords()
+    if (isOnline) {
+      void refreshOfflineFaceDataset().catch(() => undefined)
     }
 
     const syncWhenVisible = () => {
-      if (!cameraEnabled) return
-      if (document.visibilityState === 'visible') {
-        if (navigator.onLine) {
-          setIsOnline(true)
-          void refreshOfflineFaceDataset().catch(() => undefined)
-        }
-        void synchronizeOfflineRecords()
+      if (document.visibilityState !== 'visible') return
+      if (isOnline) {
+        void refreshOfflineFaceDataset().catch(() => undefined)
       }
-    }
-
-    const handleOnline = () => {
-      setIsOnline(true)
-      if (!cameraEnabled) return
       void synchronizeOfflineRecords()
     }
 
-    const handleOffline = () => {
-      setIsOnline(false)
-      setSyncingOffline(false)
+    const handleOnline = () => {
+      void synchronizeOfflineRecords()
     }
 
     window.addEventListener('online', handleOnline)
-    window.addEventListener('offline', handleOffline)
     window.addEventListener('focus', synchronizeOfflineRecords)
     document.addEventListener('visibilitychange', syncWhenVisible)
 
     return () => {
       window.removeEventListener('online', handleOnline)
-      window.removeEventListener('offline', handleOffline)
       window.removeEventListener('focus', synchronizeOfflineRecords)
       document.removeEventListener('visibilitychange', syncWhenVisible)
     }
-  }, [cameraEnabled, refreshOfflinePendingCount, synchronizeOfflineRecords])
-
-  const identifyOfflineFace = useCallback(async (photo: Blob): Promise<IdentifiedPerson | null> => {
-    // Intenta identificar localmente usando el dataset cifrado y el modelo ONNX exportado desde DJL.
-    const dataset = await getOfflineFaceDataset()
-    if (!dataset || dataset.faces.length === 0) return null
-
-    const descriptors = await generateLocalFaceDescriptorCandidates(photo)
-    if (descriptors.length === 0) return null
-
-    let bestMatch = null as ReturnType<typeof findBestOfflineFaceMatch> | null
-
-    for (const descriptor of descriptors) {
-      const match = findBestOfflineFaceMatch(dataset, descriptor)
-      if (match && (!bestMatch || match.score > bestMatch.score)) {
-        bestMatch = match
-      }
-    }
-
-    if (!bestMatch) return null
-
-    return {
-      user: {
-        id: bestMatch.face.userId,
-        name: bestMatch.face.userName,
-        dni: bestMatch.face.userDni ?? null,
-        type: (bestMatch.face.userType as User['type']) ?? null,
-      } as User,
-      photo,
-      nextAction: hasLocalCheckIn(bestMatch.face.userId) ? 'CHECK_OUT' : 'CHECK_IN',
-      faceDataId: bestMatch.face.faceDataId,
-      score: bestMatch.score,
-    }
-  }, [])
+  }, [cameraEnabled, isOnline, synchronizeOfflineRecords])
 
   useEffect(() => {
-    // Reintenta sincronizar cada 2 segundos; asi la cola se procesa rapido cuando vuelve internet.
     const timer = window.setInterval(() => {
-      if (offlinePendingCount > 0) {
+      if (pendingSyncCount > 0) {
         void synchronizeOfflineRecords()
       }
     }, 2000)
 
     return () => window.clearInterval(timer)
-  }, [offlinePendingCount, synchronizeOfflineRecords])
+  }, [pendingSyncCount, synchronizeOfflineRecords])
 
   const identifyCurrentFace = useCallback(async () => {
     if (!cameraEnabled || !cameraReady || !stream || identifying || capturePhase !== 'idle' || confirming || identified || unrecognizedDialog || result) return
@@ -316,6 +410,7 @@ export function AttendanceMarker() {
       const faceState = await detectVisibleFacePose(video)
       if (!faceState.visible) {
         setFaceBox(null)
+        setLandmarks(null)
         setAlignment('searching')
         const now = Date.now()
         faceMissingSinceRef.current ??= now
@@ -328,6 +423,61 @@ export function AttendanceMarker() {
 
       faceMissingSinceRef.current = null
       setFaceBox(faceState.box ?? null)
+      setLandmarks(faceState.landmarks ?? null)
+
+      if (effectiveLivenessRequired && !challengePassedRef.current) {
+        const challenge =
+          challengeRef.current ??
+          (challengeRef.current = createActiveFaceChallenge(challengeTypeRef.current, challengeConfig))
+
+        if (!faceState.box) {
+          setAlignment('searching')
+          return
+        }
+
+        const alignmentGate = evaluateChallengeAlignmentGate(
+          faceState.box,
+          faceState.pose,
+          alignmentConfig,
+          challenge.getProgress(),
+        )
+
+        if (alignmentGate !== 'aligned') {
+          setAlignment(alignmentGate)
+          return
+        }
+
+        const blinkScores = readBlinkScores(faceState.blendshapes)
+        let blinkCycleComplete = false
+        if (blinkScores) {
+          blinkHistoryRef.current.push(blinkScores)
+          if (blinkHistoryRef.current.length > 30) {
+            blinkHistoryRef.current.shift()
+          }
+          blinkCycleComplete = detectBlinkCycle(blinkHistoryRef.current, {
+            closedThreshold: challengeConfig.thresholds.blinkClosedMin,
+            openThreshold: challengeConfig.thresholds.blinkOpenMax,
+          })
+        }
+
+        const blinkScore = blinkScores ? Math.max(blinkScores.left, blinkScores.right) : undefined
+
+        const step = challenge.submitAnalysis({
+          pose: faceState.pose,
+          pose3d: faceState.pose3d,
+          landmarks: faceState.landmarks ?? undefined,
+          blinkScore,
+          blinkCycleComplete,
+        })
+        setChallengePrompt(step.prompt)
+        setAlignment('aligned')
+        if (step.passed) {
+          setChallengeDone(true)
+          await requestChallengeToken()
+          challengePassedRef.current = true
+        }
+        return
+      }
 
       const faceAlignment = faceState.box
         ? evaluateFaceAlignment(faceState.box, faceState.pose, null, alignmentConfig)
@@ -355,7 +505,10 @@ export function AttendanceMarker() {
 
       setCapturePhase('identifying')
       setCaptureProgress(95)
-      const res = await identifyFacePhoto(capturedPhoto)
+      const identifyResult = await identifyCapturedFace(capturedPhoto, {
+        isOnline: true,
+        challengeToken: challengeTokenRef.current,
+      })
       setCaptureProgress(100)
       if (attemptId !== identityAttemptRef.current) return
 
@@ -365,53 +518,53 @@ export function AttendanceMarker() {
         return
       }
 
-      if (res.requiresReenrollment) {
+      if (identifyResult.requiresReenrollment) {
         setResult({
           title: 'Revalidacion facial requerida',
-          description: res.message ?? 'Tu registro facial debe actualizarse antes de marcar asistencia.',
+          description: identifyResult.message ?? 'Tu registro facial debe actualizarse antes de marcar asistencia.',
           statusLabel: 'Revalidar',
           variant: 'warning',
         })
         return
       }
 
-      if (!res.matched || !res.user) {
+      if (!identifyResult.matched || !identifyResult.user || !identifyResult.nextAction) {
         setMessage(null)
-        setUnrecognizedDialog(res.message ?? 'No pudimos identificar este rostro.')
+        setUnrecognizedDialog(identifyResult.message ?? 'No pudimos identificar este rostro.')
         return
       }
 
-      if (res.nextAction === 'CHECK_OUT') {
-        // Si el backend confirma que ya tiene entrada hoy, recordamos ese estado para una posible salida offline.
-        rememberLocalCheckIn(res.user)
-      } else {
-        // Si el backend dice que aun toca entrada, limpiamos cualquier estado local viejo para no mostrar salida por error.
-        forgetLocalCheckIn(res.user.id)
-      }
-
       setMessage(null)
-      identityConfirmedAtRef.current = Date.now()
-      setIdentified({
-        user: res.user,
+      setIdentifiedWithPreview({
+        user: identifyResult.user,
         photo: capturedPhoto,
-        nextAction: res.nextAction === 'CHECK_OUT' ? 'CHECK_OUT' : 'CHECK_IN',
+        nextAction: identifyResult.nextAction,
+        faceDataId: identifyResult.faceDataId,
+        score: identifyResult.score,
       })
     } catch (error) {
       if (isConnectionError(error) && capturedPhoto) {
         if (attemptId !== identityAttemptRef.current) return
-        setIsOnline(false)
+        reportConnectionError()
         try {
-          const offlineIdentity = await identifyOfflineFace(capturedPhoto)
+          const offlineResult = await identifyCapturedFace(capturedPhoto, { isOnline: false })
           if (attemptId !== identityAttemptRef.current) return
-          if (!offlineIdentity) {
+          if (!offlineResult.matched || !offlineResult.user || !offlineResult.nextAction) {
             setMessage(null)
-            setUnrecognizedDialog('Sin conexion. No pudimos reconocer el rostro con el dataset offline guardado.')
+            setUnrecognizedDialog(
+              offlineResult.message ?? 'Sin conexion. No pudimos reconocer el rostro con el dataset offline guardado.',
+            )
             return
           }
 
           setMessage(null)
-          identityConfirmedAtRef.current = Date.now()
-          setIdentified(offlineIdentity)
+          setIdentifiedWithPreview({
+            user: offlineResult.user,
+            photo: capturedPhoto,
+            nextAction: offlineResult.nextAction,
+            faceDataId: offlineResult.faceDataId,
+            score: offlineResult.score,
+          })
           return
         } catch {
           setMessageType('error')
@@ -422,7 +575,7 @@ export function AttendanceMarker() {
 
       setMessageType('error')
       setMessage(
-        navigator.onLine
+        isOnline
           ? 'No se pudo identificar el rostro. Revisa conexion con el backend.'
           : 'Sin conexion. Para identificar un rostro por primera vez se necesita internet.',
       )
@@ -431,7 +584,7 @@ export function AttendanceMarker() {
       setCapturePhase('idle')
       setCaptureProgress(0)
     }
-  }, [alignmentConfig, cameraEnabled, cameraReady, capturePhase, clearCurrentIdentity, confirming, identified, identifyOfflineFace, identifying, result, stream, unrecognizedDialog, videoRef])
+  }, [alignmentConfig, cameraEnabled, cameraReady, capturePhase, challengeConfig, clearCurrentIdentity, confirming, effectiveLivenessRequired, identified, identifying, reportConnectionError, requestChallengeToken, result, setIdentifiedWithPreview, stream, unrecognizedDialog, videoRef])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -441,51 +594,6 @@ export function AttendanceMarker() {
     return () => window.clearInterval(timer)
   }, [identifyCurrentFace])
 
-  useEffect(() => {
-    if (!identified || !cameraEnabled || !cameraReady || !stream || confirming || checkingOut) return
-
-    let cancelled = false
-
-    async function watchIdentifiedFace() {
-      const video = videoRef.current
-      if (!video || video.readyState < 2) return
-
-      const faceState = await detectVisibleFacePose(video)
-      if (cancelled) return
-
-      if (!faceState.visible) {
-        const now = Date.now()
-        faceMissingSinceRef.current ??= now
-        if (now - faceMissingSinceRef.current >= FACE_LOST_CLEAR_MS) {
-          clearCurrentIdentity()
-        }
-        return
-      }
-
-      faceMissingSinceRef.current = null
-
-      if (didFaceChangeSignificantly(lastFaceBoxRef.current, faceState.box)) {
-        clearCurrentIdentity()
-        return
-      }
-
-      lastFaceBoxRef.current = faceState.box ?? lastFaceBoxRef.current
-
-      if (identityConfirmedAtRef.current && Date.now() - identityConfirmedAtRef.current >= IDENTIFICATION_STALE_MS) {
-        clearCurrentIdentity(false)
-      }
-    }
-
-    const timer = window.setInterval(() => {
-      void watchIdentifiedFace()
-    }, 350)
-
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [cameraEnabled, cameraReady, checkingOut, clearCurrentIdentity, confirming, identified, stream, videoRef])
-
   async function confirmAttendance() {
     if (!identified) return
 
@@ -493,7 +601,11 @@ export function AttendanceMarker() {
     setCapturePhase('confirming')
     setCaptureProgress(95)
     try {
-      const res = await verifyFacePhoto(identified.photo, 'CHECK_IN')
+      const res = await verifyFacePhoto(identified.photo, 'CHECK_IN', undefined, challengeTokenRef.current)
+      if (res.challengeRequired) {
+        handleChallengeRejected()
+        return
+      }
       if (res.requiresReenrollment) {
         setResult({
           title: 'Revalidacion facial requerida',
@@ -501,7 +613,7 @@ export function AttendanceMarker() {
           statusLabel: 'Revalidar',
           variant: 'warning',
         })
-        setIdentified(null)
+        clearCurrentIdentity(false)
         return
       }
 
@@ -533,7 +645,7 @@ export function AttendanceMarker() {
         variant: res.alreadyRegistered || isLate ? 'warning' : 'success',
       })
       setCaptureProgress(100)
-      setIdentified(null)
+      clearCurrentIdentity(false)
     } catch (error) {
       if (isConnectionError(error)) {
         await enqueueOfflineAttendance({
@@ -544,8 +656,8 @@ export function AttendanceMarker() {
           faceDataId: identified.faceDataId ?? null,
           score: identified.score ?? null,
         })
-        setIsOnline(false)
-        await refreshOfflinePendingCount()
+        reportConnectionError()
+        await refreshPendingSyncCount()
         setResult({
           title: 'Asistencia guardada',
           description: 'No hay conexion. La asistencia quedo guardada y se sincronizara automaticamente cuando vuelva internet.',
@@ -554,7 +666,7 @@ export function AttendanceMarker() {
           variant: 'warning',
         })
         setMessage(null)
-        setIdentified(null)
+        clearCurrentIdentity(false)
         return
       }
 
@@ -596,8 +708,12 @@ export function AttendanceMarker() {
         return
       }
 
-      const res = await verifyFacePhoto(photo, 'CHECK_OUT')
+      const res = await verifyFacePhoto(photo, 'CHECK_OUT', undefined, challengeTokenRef.current)
       setCaptureProgress(100)
+      if (res.challengeRequired) {
+        handleChallengeRejected()
+        return
+      }
       if (res.requiresReenrollment) {
         setResult({
           title: 'Revalidacion facial requerida',
@@ -633,8 +749,8 @@ export function AttendanceMarker() {
           faceDataId: identified?.faceDataId ?? null,
           score: identified?.score ?? null,
         })
-        setIsOnline(false)
-        await refreshOfflinePendingCount()
+        reportConnectionError()
+        await refreshPendingSyncCount()
         setResult({
           title: 'Salida guardada',
           description: 'No hay conexion. La salida quedo guardada y se sincronizara automaticamente cuando vuelva internet.',
@@ -643,7 +759,7 @@ export function AttendanceMarker() {
           variant: 'warning',
         })
         setMessage(null)
-        setIdentified(null)
+        clearCurrentIdentity(false)
         return
       }
 
@@ -689,7 +805,7 @@ export function AttendanceMarker() {
 
       closePasswordFallback()
       setMessage(null)
-      setIdentified(null)
+      clearCurrentIdentity(false)
       setResult({
         title: isCheckOut
           ? 'Salida registrada'
@@ -721,18 +837,20 @@ export function AttendanceMarker() {
 
     if (identified.nextAction === 'CHECK_OUT') {
       await markCheckOut()
-      setIdentified(null)
+      clearCurrentIdentity(false)
       return
     }
 
     await confirmAttendance()
   }
 
-  const showCameraOffMessage = !cameraEnabled
+  const showIdentifiedMessage = identified !== null && !cameraEnabled
+  const showCameraOffMessage = !cameraEnabled && !identified
   const showOfflineMessage = cameraEnabled && !isOnline
-  const showSyncMessage = cameraEnabled && isOnline && syncingOffline && offlinePendingCount > 0 && capturePhase === 'idle'
+  const showSyncMessage = cameraEnabled && isOnline && isSyncing && pendingSyncCount > 0 && capturePhase === 'idle'
   const showProcessingFaceMessage = cameraEnabled && cameraReady && capturePhase !== 'idle' && !showSyncMessage
-  const showWaitingFaceMessage = cameraEnabled && cameraReady && capturePhase === 'idle' && !showOfflineMessage && !showSyncMessage
+  const showChallengeMessage = cameraEnabled && cameraReady && capturePhase === 'idle' && effectiveLivenessRequired && !challengeDone
+  const showWaitingFaceMessage = cameraEnabled && cameraReady && capturePhase === 'idle' && challengeDone && !showOfflineMessage && !showSyncMessage
 
   const captureOverlayTitle =
     capturePhase === 'capturing'
@@ -741,30 +859,34 @@ export function AttendanceMarker() {
         ? 'Identificando rostro...'
         : 'Confirmando...'
 
+  const challengeNeedsAlignment =
+    showChallengeMessage && alignment !== 'aligned' && alignment !== 'searching'
+
   const overlayMessage =
-    showCameraOffMessage
+    showIdentifiedMessage
+      ? 'Rostro identificado. Confirma tu marcacion en el dialogo.'
+      : showCameraOffMessage
       ? 'Camara apagada'
       : showProcessingFaceMessage
         ? 'Identificando rostro...'
+      : showChallengeMessage
+        ? challengeNeedsAlignment
+          ? faceAlignmentMessage(alignment)
+          : alignment === 'searching'
+            ? 'Coloca tu rostro dentro del marco'
+            : challengePrompt
       : showOfflineMessage
-        ? offlinePendingCount > 0
-          ? 'Sin conexion a internet. Tu marcacion se guardara y se sincronizara cuando vuelva internet.'
-          : 'Sin conexion a internet.'
+        ? pendingSyncCount > 0
+          ? 'Sin conexion. Tu marcacion se guardara y se sincronizara cuando vuelva internet.'
+          : 'Sin conexion. El sistema sigue disponible en modo offline.'
         : showSyncMessage
           ? 'Sincronizando marcaciones pendientes...'
           : showWaitingFaceMessage
               ? alignment === 'searching'
                 ? 'Coloca tu rostro frente a la camara'
                 : alignment === 'aligned'
-                  ? `Rostro al ${getFaceWidthPercent(faceBox)}% de ancho. Manten la posicion, identificando...`
-                  : faceAlignmentMessage(
-                      alignment,
-                      {
-                        widthPercent: getFaceWidthPercent(faceBox),
-                        targetPercent: alignmentConfig.targetWidthPercent,
-                      },
-                      alignmentConfig.targetWidthPercent,
-                    )
+                  ? 'Perfecto, manten la posicion, identificando...'
+                  : faceAlignmentMessage(alignment)
               : status
 
   return (
@@ -810,9 +932,17 @@ export function AttendanceMarker() {
             <div className="h-2 bg-brand-blue" />
             <div className="p-6">
               <div className="flex items-start gap-4">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-brand-blue/10 text-lg font-black text-brand-blue">
-                  ID
-                </div>
+                {identifiedPreviewUrl ? (
+                  <img
+                    src={identifiedPreviewUrl}
+                    alt="Rostro capturado"
+                    className="h-16 w-16 shrink-0 rounded-full object-cover ring-2 ring-brand-blue/30"
+                  />
+                ) : (
+                  <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-brand-blue/10 text-lg font-black text-brand-blue">
+                    ID
+                  </div>
+                )}
                 <div>
                   <h3 className="text-lg font-bold text-slate-950">Rostro identificado</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-600">
@@ -840,7 +970,7 @@ export function AttendanceMarker() {
                 <LoadingButton
                   type="button"
                   variant="dark"
-                  onClick={() => setIdentified(null)}
+                  onClick={cancelIdentified}
                   disabled={confirming || checkingOut}
                 >
                   Cancelar
@@ -949,13 +1079,34 @@ export function AttendanceMarker() {
       )}
 
       <div className="relative overflow-hidden rounded-xl bg-black ring-1 ring-black/10">
-        <video ref={videoRef} className="aspect-video w-full object-cover" playsInline muted autoPlay />
-        {cameraEnabled && cameraReady && <FaceBoxOverlay box={faceBox} alignment={alignment} />}
+        {identifiedPreviewUrl && !cameraReady ? (
+          <img
+            src={identifiedPreviewUrl}
+            alt="Rostro capturado"
+            className="aspect-video w-full object-cover"
+          />
+        ) : (
+          <video ref={videoRef} className="aspect-video w-full object-cover" playsInline muted autoPlay />
+        )}
         {cameraEnabled && cameraReady && (
-          <FaceCoverageIndicator
-            widthPercent={getFaceWidthPercent(faceBox)}
+          <FacePositionGuide
             alignment={alignment}
-            targetPercent={alignmentConfig.targetWidthPercent}
+            faceBox={faceBox}
+            runtimeConfig={alignmentConfig}
+            faceGuide={faceGuide}
+          />
+        )}
+        {cameraEnabled && cameraReady && (
+          <FaceBoxOverlay box={faceBox} showFaceBox={showFaceBox} alignment={alignment} />
+        )}
+        {cameraEnabled && cameraReady && showFaceLandmarks && (
+          <FaceLandmarksOverlay
+            landmarks={landmarks}
+            alignment={alignment}
+            landmarkLayers={landmarkLayers}
+            landmarkDrawStyle={landmarkDrawStyle}
+            landmarkPointSizePx={landmarkPointSizePx}
+            landmarkAlignmentColors={landmarkAlignmentColors}
           />
         )}
       </div>
@@ -977,24 +1128,26 @@ export function AttendanceMarker() {
 
       {!result && (
         <div className="grid gap-3">
-          <LoadingButton
-            type="button"
-            variant={cameraEnabled ? 'dark' : 'primary'}
-            className={cameraEnabled ? 'fixed bottom-6 left-1/2 z-[60] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 shadow-xl sm:w-auto' : undefined}
-            onClick={() => {
-              if (cameraEnabled) {
-                turnCameraOff()
-                return
-              }
+          {!identified && (
+            <LoadingButton
+              type="button"
+              variant={cameraEnabled ? 'dark' : 'primary'}
+              className={cameraEnabled ? 'fixed bottom-6 left-1/2 z-[60] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 shadow-xl sm:w-auto' : undefined}
+              onClick={() => {
+                if (cameraEnabled) {
+                  turnCameraOff()
+                  return
+                }
 
-              setMessage(null)
-              setResult(null)
-              setCameraEnabled(true)
-            }}
-            disabled={confirming || checkingOut}
-          >
-            {cameraEnabled ? 'Apagar camara' : 'Encender camara'}
-          </LoadingButton>
+                setMessage(null)
+                setResult(null)
+                setCameraEnabled(true)
+              }}
+              disabled={confirming || checkingOut}
+            >
+              {cameraEnabled ? 'Apagar camara' : 'Encender camara'}
+            </LoadingButton>
+          )}
           <LoadingButton
             type="button"
             variant="dark"

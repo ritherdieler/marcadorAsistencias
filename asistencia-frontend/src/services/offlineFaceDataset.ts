@@ -1,4 +1,4 @@
-﻿import { fetchOfflineFaceDataset, type OfflineFaceDataset, type OfflineFaceItem } from './recognitionService'
+import { fetchOfflineFaceDataset, type OfflineFaceDataset, type OfflineFaceItem } from './recognitionService'
 
 const DB_NAME = 'giga-face-offline'
 const DB_VERSION = 1

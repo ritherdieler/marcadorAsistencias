@@ -4,9 +4,10 @@ type CoveragePresetCardProps = {
   description: string
   selected: boolean
   onSelect: () => void
+  badge?: string
 }
 
-export function CoveragePresetCard({ label, percent, description, selected, onSelect }: CoveragePresetCardProps) {
+export function CoveragePresetCard({ label, percent, description, selected, onSelect, badge }: CoveragePresetCardProps) {
   return (
     <button
       type="button"
@@ -22,7 +23,7 @@ export function CoveragePresetCard({ label, percent, description, selected, onSe
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-bold text-slate-900">{label}</span>
         <span className={['rounded-full px-2 py-0.5 text-xs font-black', selected ? 'bg-brand-blue text-white' : 'bg-slate-100 text-slate-600'].join(' ')}>
-          {percent}%
+          {badge ?? `${percent}%`}
         </span>
       </div>
       <p className="mt-2 text-xs leading-5 text-slate-600">{description}</p>

@@ -296,6 +296,13 @@ export function AdminRegistration() {
                   active
                   mirror
                   faceBox={enroll.faceBox}
+                  landmarks={enroll.landmarks}
+                  showFaceLandmarks={enroll.showFaceLandmarks}
+                  showFaceBox={enroll.showFaceBox}
+                  landmarkDrawStyle={enroll.landmarkDrawStyle}
+                  landmarkPointSizePx={enroll.landmarkPointSizePx}
+                  landmarkAlignmentColors={enroll.landmarkAlignmentColors}
+                  landmarkLayers={enroll.landmarkLayers}
                   alignment={enroll.alignment}
                   countdown={enroll.countdown}
                   capturing={enroll.capturing}
@@ -306,7 +313,8 @@ export function AdminRegistration() {
                   onRetry={enroll.retryCamera}
                   devices={enroll.devices}
                   deviceId={enroll.deviceId}
-                  targetWidthPercent={enroll.targetWidthPercent}
+                  runtimeConfig={enroll.runtimeConfig}
+                  faceGuide={enroll.faceGuide}
                   onSelectDevice={enroll.selectDevice}
                 />
               )}

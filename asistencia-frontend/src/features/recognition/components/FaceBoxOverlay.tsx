@@ -3,18 +3,13 @@ import type { FaceAlignment } from '../services/faceAlignment'
 
 type FaceBoxOverlayProps = {
   box: FaceBox | null
-  alignment: FaceAlignment
+  showFaceBox?: boolean
+  alignment?: FaceAlignment
   mirror?: boolean
 }
 
-export function FaceBoxOverlay({ box, alignment, mirror = false }: FaceBoxOverlayProps) {
-  if (!box) {
-    return (
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden="true">
-        <div className="h-[64%] w-[46%] max-w-[260px] rounded-[48%] border-2 border-dashed border-white/55" />
-      </div>
-    )
-  }
+export function FaceBoxOverlay({ box, showFaceBox = false, alignment = 'searching', mirror = false }: FaceBoxOverlayProps) {
+  if (!box || !showFaceBox) return null
 
   const aligned = alignment === 'aligned'
   const warning =

@@ -1,0 +1,46 @@
+---
+description: Documentar cada feature implementada en .agent-docs
+alwaysApply: true
+---
+
+# Documentacion en .agent-docs
+
+Cada feature, cambio de UX o flujo nuevo debe quedar documentado en `.agent-docs/` antes de dar la tarea por cerrada.
+
+## Cuando documentar
+
+- Al completar un plan o feature con cambios de codigo.
+- Tras ejecutar `npm run build` con exito (registrar resultado en el doc tocado).
+- Al modificar comportamiento visible (kiosko, registro, admin, offline, reto activo).
+
+## Que hacer
+
+1. **Crear o actualizar** el `.md` correspondiente en `.agent-docs/`.
+2. **Actualizar el indice** en [`.agent-docs/README.md`](../.agent-docs/README.md) si es un doc nuevo.
+3. **Enlazar docs relacionados** (ej. detalle en un archivo, resumen en `face-vision-unified.md`).
+4. Incluir en el doc: proposito, archivos clave, config/localStorage, flujo, defaults y verificacion de build.
+
+## Donde documentar
+
+| Tema | Archivo principal |
+|------|-------------------|
+| Guia visual / alineacion / cobertura | `face-position-guide.md`, `face-registration-ux.md` |
+| Reto activo / liveness | `face-recognition-active-challenge.md`, `face-challenge-config.md` |
+| Vision / worker / MediaPipe | `face-vision-unified.md` |
+| Landmarks overlay | `face-landmarks-overlay.md` |
+| Red / offline | `network-status-ux.md` |
+| Backend API facial | `backend-face-endpoints.md` |
+| Otro dominio | Nuevo `.md` descriptivo + entrada en el README del indice |
+
+## Ejemplo minimo de seccion nueva
+
+```markdown
+## Nombre de la feature (YYYY-MM-DD)
+
+- Proposito en una linea.
+- Archivos: `path/to/file.ts`.
+- Config: clave localStorage, defaults.
+- Build: `npm run build` — OK (fecha).
+```
+
+No cerrar una tarea de implementacion sin doc actualizada o justificacion explicita de que no aplica.

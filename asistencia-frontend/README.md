@@ -45,3 +45,7 @@ Rutas principales:
 - `http://localhost:5173/terminal`
 - `http://localhost:5173/login`
 - `http://localhost:5173/admin`
+
+## Documentacion de features
+
+Decisiones de implementacion y UX documentadas en [`.agent-docs/README.md`](.agent-docs/README.md).

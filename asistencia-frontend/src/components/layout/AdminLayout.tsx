@@ -126,7 +126,7 @@ export function AdminLayout() {
             </div>
           </header>
 
-          <main className="flex-1 px-4 py-6 md:px-8">
+          <main className="flex-1 px-4 pb-6 pt-16 md:px-8 md:pt-6">
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-7">
               <Outlet />
             </div>

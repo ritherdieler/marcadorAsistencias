@@ -16,6 +16,13 @@ export interface VerifyFaceResponse {
   nextAction?: FaceAction | 'NONE' | string | null
   alreadyRegistered?: boolean
   requiresReenrollment?: boolean
+  challengeRequired?: boolean
+}
+
+export interface FaceChallenge {
+  challengeId: string
+  expiresInMs: number
+  enabled: boolean
 }
 
 export interface OfflineFaceItem {
@@ -61,6 +68,7 @@ type RawVerifyFaceResponse = {
   nextAction?: FaceAction | 'NONE' | string | null
   alreadyRegistered?: boolean
   requiresReenrollment?: boolean
+  challengeRequired?: boolean
 }
 
 export interface PasswordAttendanceRequest {
@@ -121,6 +129,7 @@ function normalizeVerifyFaceResponse(data: RawVerifyFaceResponse): VerifyFaceRes
     nextAction: data.nextAction,
     alreadyRegistered: data.alreadyRegistered,
     requiresReenrollment: data.requiresReenrollment,
+    challengeRequired: data.challengeRequired,
   }
 }
 
@@ -161,16 +170,30 @@ export async function fetchOfflineFaceDataset(): Promise<OfflineFaceDataset> {
   return data
 }
 
-export async function identifyFacePhoto(photo: Blob): Promise<VerifyFaceResponse> {
+export async function startFaceChallenge(): Promise<FaceChallenge> {
+  // Pide al backend un reto de un solo uso (Nivel B) que se valida al marcar asistencia.
+  const { data } = await http.post<FaceChallenge>('/api/face/challenge/start')
+  return data
+}
+
+export async function identifyFacePhoto(photo: Blob, challengeToken?: string | null): Promise<VerifyFaceResponse> {
   // Identifica el rostro enviando la foto; el backend genera el descriptor y compara contra face_data.
   const formData = new FormData()
   formData.append('photo', photo, facePhotoFileName('identify-face', photo))
+  if (challengeToken) {
+    formData.append('challengeToken', challengeToken)
+  }
 
   const { data } = await http.post<RawVerifyFaceResponse>('/api/face/identify/photo', formData)
   return normalizeVerifyFaceResponse(data)
 }
 
-export async function verifyFacePhoto(photo: Blob, action: FaceAction, occurredAtMillis?: number): Promise<VerifyFaceResponse> {
+export async function verifyFacePhoto(
+  photo: Blob,
+  action: FaceAction,
+  occurredAtMillis?: number,
+  challengeToken?: string | null,
+): Promise<VerifyFaceResponse> {
   // Marca asistencia/salida enviando la foto; el backend valida el rostro y registra la accion.
   const formData = new FormData()
   formData.append('photo', photo, facePhotoFileName('attendance-face', photo))
@@ -178,6 +201,9 @@ export async function verifyFacePhoto(photo: Blob, action: FaceAction, occurredA
   if (occurredAtMillis) {
     // Para marcaciones offline se envia la hora real de captura, no la hora de sincronizacion.
     formData.append('occurredAtMillis', String(occurredAtMillis))
+  }
+  if (challengeToken) {
+    formData.append('challengeToken', challengeToken)
   }
 
   const { data } = await http.post<RawVerifyFaceResponse>('/api/face/verify/photo', formData)

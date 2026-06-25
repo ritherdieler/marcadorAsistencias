@@ -8,6 +8,9 @@ import {
   toRuntimeConfig,
   type FaceCoverageConfig,
   type FaceCoverageFlow,
+  type FaceLandmarkAlignmentColors,
+  type FaceLandmarkDrawStyle,
+  type FaceLandmarkLayers,
 } from '../services/faceAlignmentConfig'
 
 export function useFaceCoverageConfig() {
@@ -42,5 +45,24 @@ export function useFaceCoverageConfig() {
     [config],
   )
 
-  return { config, save, reset, getRuntimeConfig }
+  return {
+    config,
+    save,
+    reset,
+    getRuntimeConfig,
+    showFaceLandmarks: config.showFaceLandmarks,
+    showFaceBox: config.showFaceBox,
+    landmarkDrawStyle: config.landmarkDrawStyle,
+    landmarkPointSizePx: config.landmarkPointSizePx,
+    landmarkAlignmentColors: config.landmarkAlignmentColors,
+    landmarkLayers: config.landmarkLayers,
+    faceGuide: config.faceGuide,
+  }
+}
+
+export type FaceCoverageLandmarkSettings = {
+  landmarkDrawStyle: FaceLandmarkDrawStyle
+  landmarkPointSizePx: number
+  landmarkAlignmentColors: FaceLandmarkAlignmentColors
+  landmarkLayers: FaceLandmarkLayers
 }

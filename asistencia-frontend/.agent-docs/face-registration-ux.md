@@ -21,9 +21,9 @@ Tabs (Existente / Nuevo)
 | Pieza | Responsabilidad |
 |-------|-----------------|
 | [`hooks/useFaceEnrollment.ts`](../src/features/personnel/hooks/useFaceEnrollment.ts) | Lógica: cámara, loop de detección, estimación de pose, gating de calidad, countdown, captura/recaptura por ángulo, mensajes. Expone estado + handlers (sin JSX). |
-| [`registration/CameraStage.tsx`](../src/features/personnel/components/registration/CameraStage.tsx) | Video 16:9 espejado (selfie) + overlay + indicador de cobertura + región de estado `aria-live` + selector de cámara + estado de permiso denegado. |
-| [`recognition/components/FaceBoxOverlay.tsx`](../src/features/recognition/components/FaceBoxOverlay.tsx) | Dibuja el `box` real del rostro (MediaPipe) en vivo; color por estado (buscando/alineado/aviso). |
-| [`recognition/components/FaceCoverageIndicator.tsx`](../src/features/recognition/components/FaceCoverageIndicator.tsx) | Badge en vivo con % de ancho del rostro, barra hacia objetivo 25% y colores por estado. |
+| [`registration/CameraStage.tsx`](../src/features/personnel/components/registration/CameraStage.tsx) | Video 16:9 espejado (selfie) + guía de posición + overlay + región de estado `aria-live` + selector de cámara. |
+| [`recognition/components/FacePositionGuide.tsx`](../src/features/recognition/components/FacePositionGuide.tsx) | Orquesta óvalo objetivo, flechas animadas y barra de zonas (configurable en admin). |
+| [`recognition/components/FaceBoxOverlay.tsx`](../src/features/recognition/components/FaceBoxOverlay.tsx) | Caja rectangular opcional sobre el rostro detectado; color por estado. |
 | [`registration/CaptureCountdown.tsx`](../src/features/personnel/components/registration/CaptureCountdown.tsx) | Cuenta 3‑2‑1 al mantener la pose alineada. |
 | [`registration/CaptureProgressRing.tsx`](../src/features/personnel/components/registration/CaptureProgressRing.tsx) | Anillo de progreso con `role="progressbar"`. |
 | [`registration/CapturedThumbnails.tsx`](../src/features/personnel/components/registration/CapturedThumbnails.tsx) | Miniaturas por ángulo con recaptura individual. |
@@ -39,7 +39,7 @@ En `useFaceEnrollment`, por cada frame (cada `280 ms`):
 1. `detectVisibleFacePose(video)` → `{ visible, pose, box }`.
 2. Sin `box` real ⇒ estado `searching` (no captura).
 3. Con `box`: `evaluateFaceAlignment(box, pose, angle)`:
-   - `too_far` / `too_close` por **ancho del rostro** (`minFaceWidth: 0.25` = 25%, `maxFaceWidth: 0.75` = 75%).
+   - `too_far` / `too_close` por **ancho del rostro** (`minFaceWidth` = objetivo; `maxFaceWidth` = `min(objetivo × upperWidthRatio, 75%)`).
    - `off_center` por centrado (tolerancia `0.16` frontal, `0.30` en giros).
    - `wrong_pose` si la pose no coincide con el ángulo objetivo.
    - `aligned` en caso correcto.
@@ -85,10 +85,10 @@ Permite ajustar la cobertura minima del rostro (ancho %) por flujo con preview e
 
 ### Defaults por flujo
 
-| Flujo | `targetWidthPercent` |
-|-------|---------------------|
-| Marcacion (`attendance`) | 20% |
-| Registro (`registration`) | 25% |
+| Flujo | `targetWidthPercent` | `upperWidthRatio` |
+|-------|---------------------|-------------------|
+| Marcacion (`attendance`) | 20% | 1.35 (default) |
+| Registro (`registration`) | 25% | 1.35 (default) |
 
 Presets: Lejano 20%, Estandar 25%, Estricto 35%.
 
@@ -102,23 +102,38 @@ La logica de alineacion del rostro vive en [`recognition/services/faceAlignment.
 | Constante | Valor | Efecto |
 |-----------|-------|--------|
 | `minFaceWidth` | configurable (default 20% marcacion / 25% registro) | Rostro demasiado lejos → `too_far` |
-| `maxFaceWidth` | **0.75** (75%) | Rostro demasiado cerca → `too_close` |
+| `maxFaceWidth` | `min(objetivo × upperWidthRatio, 75%)` | Rostro demasiado cerca → `too_close` |
+| `upperWidthRatio` | configurable 1.1–1.6 (default 1.35) | Tolerancia hacia camara en panel admin |
 | `targetWidthPercent` | igual a `minFaceWidth × 100` | Objetivo visible en UI y mensajes |
 
-- `getFaceWidthPercent(box)` → porcentaje entero del ancho del rostro sobre el frame.
+- `getFaceWidthPercent(box)` → porcentaje entero (solo diagnóstico admin).
 - `evaluateFaceAlignment(box, pose, expectedPose)` → estados de alineacion. Pasar `expectedPose = null` omite el chequeo de pose (marcacion).
-- `faceAlignmentMessage(alignment, { widthPercent })` → mensaje con dato en vivo, ej. *"Rostro al 18% de ancho. Objetivo: 25%. Acercate."*
-- [`FaceBoxOverlay`](../src/features/recognition/components/FaceBoxOverlay.tsx): box real del rostro con color por estado.
-- [`FaceCoverageIndicator`](../src/features/recognition/components/FaceCoverageIndicator.tsx): badge superpuesto con % en vivo y barra con marca en 25%.
+- `faceAlignmentMessage(alignment)` → mensajes cortos sin porcentajes (*"Acercate un poco"*, *"Perfecto, manten la posicion"*).
+- `faceAlignmentDiagnosticMessage(...)` → incluye %; solo en preview admin.
+- [`FacePositionGuide`](../src/features/recognition/components/FacePositionGuide.tsx): óvalo + flechas + barra de zonas según `faceGuide` en config.
 
 ### Marcacion de asistencia
 
 En [`AttendanceMarker`](../src/features/attendance/components/AttendanceMarker.tsx):
 
-- `FaceBoxOverlay` + `FaceCoverageIndicator` en vivo sobre el video.
-- Mensajes con porcentaje en la region `aria-live="polite"`.
+- `FacePositionGuide` + `FaceBoxOverlay` (opcional) sobre el video.
+- Mensajes sin porcentaje en la region `aria-live="polite"`.
 - La identificacion solo dispara cuando `alignment === 'aligned'` (ancho >= 25%, centrado). El video no se espeja (kiosko).
 - Overlay [`ProcessingOverlay`](../src/components/ui/ProcessingOverlay.tsx) durante captura/procesamiento con fases `capturing` → `identifying` → `confirming` y progreso estimado 0–100%.
+
+#### Camara tras identificacion (terminal `/terminal`)
+
+| Evento | Camara | UX |
+|--------|--------|-----|
+| Identificacion exitosa (online u offline) | Se apaga el stream de inmediato | Preview estatico de la foto capturada en el contenedor de video + miniatura circular en el modal de confirmacion |
+| Cancelar en modal identificado | Se re-enciende automaticamente | Retoma deteccion sin pasos extra |
+| Confirmar → resultado → Entendido | Permanece apagada | La siguiente persona pulsa Encender camara |
+| Rostro no reconocido / revalidacion | Sin cambio | La camara sigue activa para reintentar |
+
+- Tras un match, `setIdentifiedWithPreview` guarda el `Blob` capturado, crea una URL de preview y llama a `stopCameraStream` (libera tracks sin limpiar la identidad).
+- Se elimino el watcher post-identificacion (`IDENTIFICATION_STALE_MS`); la confirmacion usa la foto ya capturada, no el video en vivo.
+- El boton Encender/Apagar camara se oculta mientras el modal de identificacion esta abierto.
+- Mensaje de estado durante confirmacion: *"Rostro identificado. Confirma tu marcacion en el dialogo."*
 
 ## Loader de captura (alta resolucion)
 
@@ -151,6 +166,18 @@ Evita la sensacion de pagina congelada al procesar fotos en canvas.
 ### Camara
 
 En [`faceCaptureConfig.ts`](../src/config/faceCaptureConfig.ts): `max 1280×720` en `FACE_CAMERA_CONSTRAINTS` para evitar streams 4K innecesarios.
+
+## Build verification (2026-06-24)
+
+- `npm run build` (tsc + vite) — OK
+- Cambio: camara se apaga tras identificacion facial en terminal; preview estatico + re-encendido automatico al cancelar confirmacion.
+
+## Build verification (2026-06-25)
+
+- `npm run build` — OK
+- Banda too_close: `maxFaceWidth = min(objetivo x upperWidthRatio, 75%)`; alineacion previa al reto documentada en `face-recognition-active-challenge.md`.
+- Ratio superior configurable por flujo (`upperWidthRatio`) en Configuracion facial.
+- Centrado frontal: tolerancia fija `centerToleranceFront = 0.10` (±10% del frame). Reemplaza tanto el 16% previo (demasiado permisivo) como el ajuste a silueta (demasiado estricto, ~1.5% de margen).
 
 ## Build verification (2026-06-23)
 

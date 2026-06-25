@@ -1,22 +1,26 @@
-import { FaceDetector, FilesetResolver, type Detection } from '@mediapipe/tasks-vision'
+import type { Classifications } from '@mediapipe/tasks-vision'
 
-let detectorPromise: Promise<FaceDetector> | null = null
+import { estimateFacePoseFromLandmarks } from './facePose3d'
+import type { FacePose3d } from './facePose3d'
+import { detectFromVideo } from './faceVisionService'
 
-const MEDIAPIPE_WASM_PATH = '/mediapipe/wasm'
-const MEDIAPIPE_FACE_MODEL_PATH = '/mediapipe/models/blaze_face_short_range.tflite'
-const MIN_FACE_AREA_RATIO = 0.006
-const MIN_FACE_SCORE = 0.2
 const MIN_FRAME_EDGE_RATIO = 0.004
 const MIN_FRAME_SKIN_RATIO = 0.004
-const FACE_POSE_FRONT_THRESHOLD = 0.09
-const FACE_POSE_TURN_THRESHOLD = 0.105
 
 export type FacePose = 'front' | 'left' | 'right' | 'unknown'
+
+export type FaceLandmarkPoint = {
+  x: number
+  y: number
+}
 
 export type FacePoseResult = {
   visible: boolean
   pose: FacePose
+  pose3d?: FacePose3d
   box?: FaceBox
+  landmarks?: FaceLandmarkPoint[]
+  blendshapes?: Classifications
 }
 
 export type FaceBox = {
@@ -26,44 +30,37 @@ export type FaceBox = {
   height: number
 }
 
-// Carga una sola instancia de MediaPipe FaceDetector para reutilizarla en cada frame.
-async function getFaceDetector(): Promise<FaceDetector> {
-  if (!detectorPromise) {
-    detectorPromise = createFaceDetector()
+function toFacePoseResult(
+  visible: boolean,
+  landmarks?: FaceLandmarkPoint[],
+  box?: FaceBox,
+  pose3d?: FacePose3d,
+  blendshapes?: Classifications,
+  pose?: FacePose,
+): FacePoseResult {
+  if (!visible || !landmarks) {
+    return { visible, pose: 'unknown' }
   }
 
-  return detectorPromise
+  return {
+    visible: true,
+    pose: pose ?? estimateFacePoseFromLandmarks(landmarks),
+    pose3d,
+    box,
+    landmarks,
+    blendshapes,
+  }
 }
 
-// Inicializa MediaPipe desde archivos locales para no depender de CDNs externos en ejecucion.
-async function createFaceDetector(): Promise<FaceDetector> {
-  const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_PATH)
-
-  return FaceDetector.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: MEDIAPIPE_FACE_MODEL_PATH,
-      delegate: 'CPU',
-    },
-    runningMode: 'VIDEO',
-    minDetectionConfidence: MIN_FACE_SCORE,
-  })
-}
-
-// Devuelve true cuando la camara tiene un rostro usable o, si MediaPipe falla, un frame humano probable.
 export async function hasVisibleFace(video: HTMLVideoElement): Promise<boolean> {
   if (!video.videoWidth || !video.videoHeight || video.readyState < 2) {
     return false
   }
 
   try {
-    const detector = await getFaceDetector()
-    const result = detector.detectForVideo(video, performance.now())
-    const usableFaces = result.detections.filter((face) => isUsableFace(face, video))
-
-    return usableFaces.length > 0 || hasHumanLikeFrame(video)
+    const result = await detectFromVideo(video, performance.now())
+    return result.visible || hasHumanLikeFrame(video)
   } catch {
-    // Si MediaPipe falla por WebGL/WASM/navegador, no bloquea el flujo: el backend DJL valida la identidad final.
-    detectorPromise = null
     return hasHumanLikeFrame(video)
   }
 }
@@ -74,81 +71,25 @@ export async function detectVisibleFacePose(video: HTMLVideoElement): Promise<Fa
   }
 
   try {
-    const detector = await getFaceDetector()
-    const result = detector.detectForVideo(video, performance.now())
-    const usableFaces = result.detections.filter((face) => isUsableFace(face, video))
-    const mainFace = usableFaces[0]
+    const result = await detectFromVideo(video, performance.now())
 
-    if (mainFace) {
-      return {
-        visible: true,
-        pose: estimateFacePose(mainFace, video),
-        box: toNormalizedFaceBox(mainFace, video),
-      }
+    if (result.visible && result.landmarks) {
+      return toFacePoseResult(
+        true,
+        result.landmarks,
+        result.box,
+        result.pose3d,
+        result.blendshapes,
+        result.pose,
+      )
     }
 
     return { visible: hasHumanLikeFrame(video), pose: 'unknown' }
   } catch {
-    detectorPromise = null
     return { visible: hasHumanLikeFrame(video), pose: 'unknown' }
   }
 }
 
-// Valida calidad basica del rostro: confianza y tamano.
-// El recuadro de pantalla es una guia visual; la identidad final siempre la confirma el backend DJL.
-function isUsableFace(face: Detection, video: HTMLVideoElement): boolean {
-  const box = face.boundingBox
-  if (!box || box.width <= 0 || box.height <= 0) return false
-
-  const score = face.categories[0]?.score ?? 0
-  if (score < MIN_FACE_SCORE) return false
-
-  const isNormalizedBox = box.width <= 1 && box.height <= 1
-  const faceRatio = isNormalizedBox
-    ? box.width * box.height
-    : (box.width * box.height) / (video.videoWidth * video.videoHeight)
-  if (faceRatio < MIN_FACE_AREA_RATIO) return false
-
-  return true
-}
-
-function estimateFacePose(face: Detection, video: HTMLVideoElement): FacePose {
-  const box = face.boundingBox
-  const nose = findKeypoint(face, 'nose', 2)
-  if (!box || !nose || box.width <= 0) return 'unknown'
-
-  const leftEye = findKeypoint(face, 'left eye', 1)
-  const rightEye = findKeypoint(face, 'right eye', 0)
-  const eyeCenterX = leftEye && rightEye ? ((leftEye.x + rightEye.x) / 2) * video.videoWidth : null
-  const boxCenterX = box.originX + box.width / 2
-  const centerX = eyeCenterX ?? boxCenterX
-  const noseX = nose.x * video.videoWidth
-  const noseOffsetRatio = (noseX - centerX) / box.width
-
-  if (Math.abs(noseOffsetRatio) <= FACE_POSE_FRONT_THRESHOLD) return 'front'
-  if (noseOffsetRatio >= FACE_POSE_TURN_THRESHOLD) return 'left'
-  if (noseOffsetRatio <= -FACE_POSE_TURN_THRESHOLD) return 'right'
-  return 'unknown'
-}
-
-function toNormalizedFaceBox(face: Detection, video: HTMLVideoElement): FaceBox | undefined {
-  const box = face.boundingBox
-  if (!box || box.width <= 0 || box.height <= 0) return undefined
-
-  const width = box.width / video.videoWidth
-  const height = box.height / video.videoHeight
-  const centerX = (box.originX + box.width / 2) / video.videoWidth
-  const centerY = (box.originY + box.height / 2) / video.videoHeight
-
-  return { centerX, centerY, width, height }
-}
-
-function findKeypoint(face: Detection, labelPart: string, fallbackIndex: number) {
-  const byLabel = face.keypoints.find((keypoint) => keypoint.label?.toLowerCase().includes(labelPart))
-  return byLabel ?? face.keypoints[fallbackIndex] ?? null
-}
-
-// Respaldo liviano: evita bloquear la camara cuando MediaPipe falla, pero no acepta fondos planos.
 function hasHumanLikeFrame(video: HTMLVideoElement): boolean {
   const sampleWidth = 160
   const sampleHeight = Math.max(1, Math.round((video.videoHeight / video.videoWidth) * sampleWidth))
@@ -183,7 +124,6 @@ function hasHumanLikeFrame(video: HTMLVideoElement): boolean {
   return skinPixels / totalPixels >= MIN_FRAME_SKIN_RATIO && edgePixels / totalPixels >= MIN_FRAME_EDGE_RATIO
 }
 
-// Rango amplio de color de piel para funcionar con distintas luces sin decidir identidad.
 function isSkinLike(r: number, g: number, b: number): boolean {
   const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b
   const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b
