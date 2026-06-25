@@ -126,10 +126,9 @@ Secuencia dinámica: `[center?] → [turn?] → [recenter?] → [blink?] → pas
 
 | Archivo | Rol |
 |---------|-----|
-| `faceVisionService.ts` | Instancias lazy VIDEO/IMAGE; `detectFromVideo` (worker + fallback) y `detectFromImage` (worker + fallback); tipo `FaceAnalysisResult` |
+| `faceVisionService.ts` | Instancias lazy VIDEO/IMAGE; `detectFromVideo`, `detectFromImage`; tipo `FaceAnalysisResult` |
 | `faceVisionWorkerClient.ts` | Worker Promise API + fallback main thread |
 | `workers/faceVision.worker.ts` | Inferencia MediaPipe off-thread |
-| `workers/faceVisionWorkerShims.ts` | Polyfills worker (`document`, `self.import`) + base WASM absoluta para Vite 8 |
 | `facePresenceDetector.ts` | Fachada: `detectVisibleFacePose`, tipos legacy, fallback `hasHumanLikeFrame` |
 | `facePose3d.ts` | yaw/pitch/roll; `deriveFacePoseFromYaw` |
 | `faceLandmarkMapping.ts` | `landmarksToArcFaceLandmarks` (33, 263, 1, 61, 291) |
@@ -166,10 +165,6 @@ npm run build
 ```
 
 Verificación 2026-06-25 (frontend-first reto): **OK** (tsc + vite build). Worker bundle: `dist/assets/faceVision.worker-*.js`.
-
-Verificación 2026-06-25 (detectFromVideo worker): **OK** (`npm run build`). `detectFromVideo` usa `createImageBitmap` + worker; registro precalienta con `initFaceVisionWorker` en paso guía.
-
-Verificación 2026-06-25 (Vite 8 WASM worker): **OK** (`npm run build`). `faceVisionWorkerShims.ts` evita importar assets de `/public` como módulos ES; `mediapipeWasmBase()` usa URL absoluta.
 
 ## Documentos relacionados
 

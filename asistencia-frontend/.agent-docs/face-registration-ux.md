@@ -14,14 +14,13 @@ Tabs (Existente / Nuevo)
 ```
 
 - La cámara solo se enciende en `guide` y `capture` (`active` del hook). En `review` y `success` se apaga.
-- Al entrar a `guide`, se precalienta el worker de visión (`initFaceVisionWorker`) antes de iniciar el loop de detección; el botón **Iniciar registro** permanece en loading hasta `visionReady`.
 - Al completar los 3 ángulos en `capture`, se pasa automáticamente a `review`.
 
 ## Arquitectura
 
 | Pieza | Responsabilidad |
 |-------|-----------------|
-| [`hooks/useFaceEnrollment.ts`](../src/features/personnel/hooks/useFaceEnrollment.ts) | Lógica: cámara, precalentamiento worker, loop de detección, estimación de pose, gating de calidad, countdown, captura/recaptura por ángulo, mensajes. Expone `visionReady` + handlers (sin JSX). |
+| [`hooks/useFaceEnrollment.ts`](../src/features/personnel/hooks/useFaceEnrollment.ts) | Lógica: cámara, loop de detección, estimación de pose, gating de calidad, countdown, captura/recaptura por ángulo, mensajes. Expone estado + handlers (sin JSX). |
 | [`registration/CameraStage.tsx`](../src/features/personnel/components/registration/CameraStage.tsx) | Video 16:9 espejado (selfie) + guía de posición + overlay + región de estado `aria-live` + selector de cámara. |
 | [`recognition/components/FacePositionGuide.tsx`](../src/features/recognition/components/FacePositionGuide.tsx) | Orquesta óvalo objetivo, flechas animadas y barra de zonas (configurable en admin). |
 | [`recognition/components/FaceBoxOverlay.tsx`](../src/features/recognition/components/FaceBoxOverlay.tsx) | Caja rectangular opcional sobre el rostro detectado; color por estado. |
@@ -191,12 +190,6 @@ En [`faceCaptureConfig.ts`](../src/config/faceCaptureConfig.ts): `max 1280×720`
 - Ratio superior configurable por flujo (`upperWidthRatio`) en Configuracion facial.
 - Centrado frontal: tolerancia fija `centerToleranceFront = 0.10` (±10% del frame). Reemplaza tanto el 16% previo (demasiado permisivo) como el ajuste a silueta (demasiado estricto, ~1.5% de margen).
 - Giros laterales en registro: `evaluateEnrollmentAlignment` + `resolveFacePose` + `mirrorSelfiePerspective` del config de reto activo.
-
-## Build verification (2026-06-25, worker registro)
-
-- `npm run build` — OK
-- `detectFromVideo` enruta inferencia al Web Worker (`createImageBitmap` + fallback main thread).
-- Registro precalienta el worker en paso `guide`; botón **Iniciar registro** deshabilitado con loading hasta `visionReady`.
 
 ## Build verification (2026-06-25, giros registro)
 

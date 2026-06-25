@@ -438,7 +438,7 @@ export function AdminRegistration() {
                     <LoadingButton type="button" variant="dark" onClick={() => setStep('data')}>
                       Volver
                     </LoadingButton>
-                    <LoadingButton type="button" onClick={beginCapture} loading={!enroll.visionReady} loadingText="Preparando camara...">
+                    <LoadingButton type="button" onClick={beginCapture}>
                       Iniciar registro
                     </LoadingButton>
                   </div>
