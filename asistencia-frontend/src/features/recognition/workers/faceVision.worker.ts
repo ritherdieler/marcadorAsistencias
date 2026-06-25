@@ -1,3 +1,4 @@
+import { mediapipeWasmBase } from './faceVisionWorkerShims'
 import {
   FaceLandmarker,
   FilesetResolver,
@@ -12,7 +13,6 @@ import {
 } from '../services/facePose3d'
 import type { SerializedFaceAnalysisResult } from '../services/faceVisionService'
 
-const MEDIAPIPE_WASM_PATH = '/mediapipe/wasm'
 const MEDIAPIPE_FACE_LANDMARKER_MODEL_PATH = '/mediapipe/models/face_landmarker.task'
 const MIN_FACE_AREA_RATIO = 0.006
 
@@ -93,7 +93,7 @@ async function ensureInitialized(): Promise<void> {
   if (videoLandmarker && imageLandmarker) return
   if (!initPromise) {
     initPromise = (async () => {
-      const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_PATH)
+      const vision = await FilesetResolver.forVisionTasks(mediapipeWasmBase())
       videoLandmarker = await FaceLandmarker.createFromOptions(vision, createLandmarkerOptions('VIDEO'))
       imageLandmarker = await FaceLandmarker.createFromOptions(vision, createLandmarkerOptions('IMAGE'))
     })()
