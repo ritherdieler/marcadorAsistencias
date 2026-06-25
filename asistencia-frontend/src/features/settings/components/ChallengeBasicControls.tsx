@@ -1,64 +1,17 @@
-import { LoadingButton } from '../../../components/ui/LoadingButton'
 import {
-  clampBlinkClosedMin,
-  clampBlinkOpenMax,
   clampRequiredSamples,
-  clampYawFrontDeg,
-  clampYawTurnDeg,
-  FACE_CHALLENGE_MAX_BLINK_CLOSED,
-  FACE_CHALLENGE_MAX_BLINK_OPEN,
   FACE_CHALLENGE_MAX_SAMPLES,
-  FACE_CHALLENGE_MAX_YAW_FRONT,
-  FACE_CHALLENGE_MAX_YAW_TURN,
-  FACE_CHALLENGE_MIN_BLINK_CLOSED,
-  FACE_CHALLENGE_MIN_BLINK_OPEN,
   FACE_CHALLENGE_MIN_SAMPLES,
-  FACE_CHALLENGE_MIN_YAW_FRONT,
-  FACE_CHALLENGE_MIN_YAW_TURN,
   FACE_CHALLENGE_STEP_LABELS,
   FACE_CHALLENGE_STEP_ORDER,
   type FaceChallengeConfig,
   type FaceChallengeStepId,
 } from '../../recognition/services/faceChallengeConfig'
+import { ToggleSwitch } from './ToggleSwitch'
 
-type FaceChallengeControlsProps = {
+type ChallengeBasicControlsProps = {
   draft: FaceChallengeConfig
   onDraftChange: (next: FaceChallengeConfig) => void
-  hasPendingChanges: boolean
-  saving: boolean
-  onSave: () => void
-  onReset: () => void
-}
-
-function ToggleSwitch({
-  checked,
-  label,
-  onChange,
-}: {
-  checked: boolean
-  label: string
-  onChange: (value: boolean) => void
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={[
-        'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40',
-        checked ? 'bg-brand-blue' : 'bg-slate-300',
-      ].join(' ')}
-    >
-      <span
-        className={[
-          'inline-block h-5 w-5 transform rounded-full bg-white shadow transition',
-          checked ? 'translate-x-5' : 'translate-x-1',
-        ].join(' ')}
-      />
-    </button>
-  )
 }
 
 function updateStep(
@@ -75,30 +28,14 @@ function updateStep(
   }
 }
 
-export function FaceChallengeControls({
-  draft,
-  onDraftChange,
-  hasPendingChanges,
-  saving,
-  onSave,
-  onReset,
-}: FaceChallengeControlsProps) {
+export function ChallengeBasicControls({ draft, onDraftChange }: ChallengeBasicControlsProps) {
   return (
     <div className="space-y-5">
       <div>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-bold text-slate-950">Reto activo (anti-spoofing)</h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Configura la secuencia de liveness facial antes de identificar en el kiosko.
-            </p>
-          </div>
-          {hasPendingChanges && (
-            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
-              Cambios pendientes
-            </span>
-          )}
-        </div>
+        <h2 className="text-lg font-bold text-slate-950">Reto activo (anti-spoofing)</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          Configura la secuencia de liveness facial antes de identificar en el kiosko.
+        </p>
       </div>
 
       <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-5">
@@ -300,135 +237,6 @@ export function FaceChallengeControls({
             </div>
           )
         })}
-      </div>
-
-      <div className="space-y-3">
-        <h3 className="text-sm font-semibold text-slate-900">Umbrales de deteccion</h3>
-
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-          <label htmlFor="face-challenge-yaw-front" className="text-sm font-semibold text-slate-900">
-            Yaw frontal — {draft.thresholds.yawFrontDeg}°
-          </label>
-          <p className="mt-1 text-xs text-slate-600">Angulo maximo para considerar el rostro centrado.</p>
-          <input
-            id="face-challenge-yaw-front"
-            type="range"
-            min={FACE_CHALLENGE_MIN_YAW_FRONT}
-            max={FACE_CHALLENGE_MAX_YAW_FRONT}
-            step={1}
-            value={draft.thresholds.yawFrontDeg}
-            onChange={(event) =>
-              onDraftChange({
-                ...draft,
-                thresholds: {
-                  ...draft.thresholds,
-                  yawFrontDeg: clampYawFrontDeg(Number(event.target.value)),
-                },
-              })
-            }
-            className="mt-4 h-2 w-full cursor-pointer accent-brand-blue"
-          />
-          <div className="mt-1 flex justify-between text-xs font-semibold text-slate-500">
-            <span>{FACE_CHALLENGE_MIN_YAW_FRONT}°</span>
-            <span>{FACE_CHALLENGE_MAX_YAW_FRONT}°</span>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-          <label htmlFor="face-challenge-yaw-turn" className="text-sm font-semibold text-slate-900">
-            Yaw de giro — {draft.thresholds.yawTurnDeg}°
-          </label>
-          <p className="mt-1 text-xs text-slate-600">Angulo minimo para validar el giro lateral.</p>
-          <input
-            id="face-challenge-yaw-turn"
-            type="range"
-            min={FACE_CHALLENGE_MIN_YAW_TURN}
-            max={FACE_CHALLENGE_MAX_YAW_TURN}
-            step={1}
-            value={draft.thresholds.yawTurnDeg}
-            onChange={(event) =>
-              onDraftChange({
-                ...draft,
-                thresholds: {
-                  ...draft.thresholds,
-                  yawTurnDeg: clampYawTurnDeg(Number(event.target.value)),
-                },
-              })
-            }
-            className="mt-4 h-2 w-full cursor-pointer accent-brand-blue"
-          />
-          <div className="mt-1 flex justify-between text-xs font-semibold text-slate-500">
-            <span>{FACE_CHALLENGE_MIN_YAW_TURN}°</span>
-            <span>{FACE_CHALLENGE_MAX_YAW_TURN}°</span>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-          <label htmlFor="face-challenge-blink-open" className="text-sm font-semibold text-slate-900">
-            Ojos abiertos max — {draft.thresholds.blinkOpenMax.toFixed(2)}
-          </label>
-          <p className="mt-1 text-xs text-slate-600">Score maximo para considerar los ojos abiertos.</p>
-          <input
-            id="face-challenge-blink-open"
-            type="range"
-            min={FACE_CHALLENGE_MIN_BLINK_OPEN}
-            max={FACE_CHALLENGE_MAX_BLINK_OPEN}
-            step={0.01}
-            value={draft.thresholds.blinkOpenMax}
-            onChange={(event) =>
-              onDraftChange({
-                ...draft,
-                thresholds: {
-                  ...draft.thresholds,
-                  blinkOpenMax: clampBlinkOpenMax(Number(event.target.value)),
-                },
-              })
-            }
-            className="mt-4 h-2 w-full cursor-pointer accent-brand-blue"
-          />
-          <div className="mt-1 flex justify-between text-xs font-semibold text-slate-500">
-            <span>{FACE_CHALLENGE_MIN_BLINK_OPEN}</span>
-            <span>{FACE_CHALLENGE_MAX_BLINK_OPEN}</span>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-          <label htmlFor="face-challenge-blink-closed" className="text-sm font-semibold text-slate-900">
-            Ojos cerrados min — {draft.thresholds.blinkClosedMin.toFixed(2)}
-          </label>
-          <p className="mt-1 text-xs text-slate-600">Score minimo para considerar los ojos cerrados.</p>
-          <input
-            id="face-challenge-blink-closed"
-            type="range"
-            min={FACE_CHALLENGE_MIN_BLINK_CLOSED}
-            max={FACE_CHALLENGE_MAX_BLINK_CLOSED}
-            step={0.01}
-            value={draft.thresholds.blinkClosedMin}
-            onChange={(event) =>
-              onDraftChange({
-                ...draft,
-                thresholds: {
-                  ...draft.thresholds,
-                  blinkClosedMin: clampBlinkClosedMin(Number(event.target.value)),
-                },
-              })
-            }
-            className="mt-4 h-2 w-full cursor-pointer accent-brand-blue"
-          />
-          <div className="mt-1 flex justify-between text-xs font-semibold text-slate-500">
-            <span>{FACE_CHALLENGE_MIN_BLINK_CLOSED}</span>
-            <span>{FACE_CHALLENGE_MAX_BLINK_CLOSED}</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        <LoadingButton type="button" variant="dark" onClick={onReset} disabled={saving}>
-          Restablecer recomendados
-        </LoadingButton>
-        <LoadingButton type="button" onClick={onSave} loading={saving} loadingText="Guardando..." disabled={!hasPendingChanges}>
-          Guardar configuracion
-        </LoadingButton>
       </div>
     </div>
   )

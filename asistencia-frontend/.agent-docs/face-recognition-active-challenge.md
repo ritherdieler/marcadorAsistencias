@@ -161,7 +161,7 @@ thresholds.blinkClosedMin=0.55
 ```
 
 Set `enabled=false` to skip all gating in the kiosk (identify loop runs immediately). Admin UI:
-`FaceChallengeControls` on settings.
+`ChallengeBasicControls` + `ChallengeThresholdControls` on settings (secciones Reto activo y Avanzado).
 
 ## Android (`IpsAdmin`)
 

@@ -156,7 +156,7 @@ Secuencia dinámica: `[center?] → [turn?] → [recenter?] → [blink?] → pas
 
 ## Admin UI
 
-Página: `AdminFaceCoveragePage` → `FaceCoverageControls` (cobertura + capas overlay) + `FaceChallengeControls` (reto). Preview en vivo: `FaceCoveragePreview`.
+Página: `AdminFaceCoveragePage` → secciones `CoverageDistanceControls`, `VisualGuideControls`, `LandmarkDiagnosticsControls`, `ChallengeBasicControls`, `ChallengeThresholdControls`. Preview en vivo: `FaceCoveragePreview`.
 
 ## Build
 

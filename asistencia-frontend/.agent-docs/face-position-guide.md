@@ -25,7 +25,7 @@ Replaces numeric `FaceCoverageIndicator` badge with configurable visual guides o
 
 `showFaceLandmarks` default ahora `false` (malla solo bajo demanda; configurable en panel).
 
-Admin toggles: **Guía de posición** section in `FaceCoverageControls`.
+Admin toggles: seccion **Guias visuales** en `AdminFaceCoveragePage` → `VisualGuideControls`.
 
 ## Tamaño vs cobertura objetivo
 

@@ -19,6 +19,7 @@ Documentacion tecnica de features implementadas en `asistencia-frontend`. Manten
 | [`face-position-guide.md`](face-position-guide.md) | Silueta bancaria, scrim, anillo de cercania, banda too_far/too_close |
 | [`face-registration-ux.md`](face-registration-ux.md) | Registro multiangulo, guia compartida, loader de captura, camara en terminal |
 | [`face-landmarks-overlay.md`](face-landmarks-overlay.md) | Capas Face Mesh, estilos y toggles admin |
+| [`face-config-panel-ux.md`](face-config-panel-ux.md) | Panel admin por secciones, preview sticky, guardado unificado |
 
 ## Reto activo (liveness)
 
@@ -43,7 +44,7 @@ Documentacion tecnica de features implementadas en `asistencia-frontend`. Manten
 | 2026-06-25 | Guia estilo bancario (silueta SVG, scrim, anillo) | `face-position-guide.md` |
 | 2026-06-25 | Alineacion obligatoria antes del reto activo | `face-vision-unified.md`, `face-recognition-active-challenge.md` |
 | 2026-06-25 | Banda too_close = min(objetivo x 1.35, 75%) | `face-position-guide.md`, `face-registration-ux.md` |
-| 2026-06-25 | `upperWidthRatio` configurable por flujo (admin) | `face-position-guide.md`, `face-registration-ux.md` |
+| 2026-06-25 | Panel admin por secciones (cobertura, guias, reto, avanzado) | `face-config-panel-ux.md` |
 
 ## Verificacion habitual
 

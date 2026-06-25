@@ -88,7 +88,7 @@ Los landmarks son normalizados (0-1) en coordenadas de imagen; el overlay los ma
 - Registro: [`useFaceEnrollment.ts`](../src/features/personnel/hooks/useFaceEnrollment.ts) → [`CameraStage.tsx`](../src/features/personnel/components/registration/CameraStage.tsx)
 - Preview admin: [`FaceCoveragePreview.tsx`](../src/features/settings/components/FaceCoveragePreview.tsx)
 
-Los contornos se dibujan solo cuando `showFaceLandmarks` está activo. Los toggles y capas viven en [`AdminFaceCoveragePage`](../src/features/settings/pages/AdminFaceCoveragePage.tsx) → [`FaceCoverageControls`](../src/features/settings/components/FaceCoverageControls.tsx) y se previsualizan en vivo antes de guardar.
+Los contornos se dibujan solo cuando `showFaceLandmarks` está activo. Los toggles y capas viven en [`AdminFaceCoveragePage`](../src/features/settings/pages/AdminFaceCoveragePage.tsx) → seccion **Avanzado / Diagnostico** (`LandmarkDiagnosticsControls`) y se previsualizan en vivo antes de guardar.
 
 Colores configurables por estado en `landmarkAlignmentColors`: **buscando** (`searching`), **alineado** (`aligned`) y **ajuste requerido** (`warning`: demasiado lejos, cerca, descentrado o pose incorrecta). Configs antiguas con `landmarkColorMode`/`landmarkColor` se migran al guardar o cargar.
 

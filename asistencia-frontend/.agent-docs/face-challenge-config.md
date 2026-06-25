@@ -8,7 +8,8 @@ Added 2026-06-25. Configurable active liveness challenge stored in `localStorage
 
 - [`src/features/recognition/services/faceChallengeConfig.ts`](../src/features/recognition/services/faceChallengeConfig.ts): types, defaults, normalize/clamp, load/save/reset
 - [`src/features/recognition/hooks/useFaceChallengeConfig.ts`](../src/features/recognition/hooks/useFaceChallengeConfig.ts): React hook with cross-tab sync
-- [`src/features/settings/components/FaceChallengeControls.tsx`](../src/features/settings/components/FaceChallengeControls.tsx): admin UI (Spanish)
+- [`src/features/settings/components/ChallengeBasicControls.tsx`](../src/features/settings/components/ChallengeBasicControls.tsx): admin UI reto (Spanish)
+- [`src/features/settings/components/ChallengeThresholdControls.tsx`](../src/features/settings/components/ChallengeThresholdControls.tsx): umbrales avanzados
 - [`src/features/recognition/services/activeFaceChallenge.ts`](../src/features/recognition/services/activeFaceChallenge.ts): dynamic step sequence from config; `submitAnalysis` + `submitPose` wrapper
 
 ## Defaults
