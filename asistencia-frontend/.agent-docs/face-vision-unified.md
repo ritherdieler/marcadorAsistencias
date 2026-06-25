@@ -126,7 +126,7 @@ Secuencia dinámica: `[center?] → [turn?] → [recenter?] → [blink?] → pas
 
 | Archivo | Rol |
 |---------|-----|
-| `faceVisionService.ts` | Instancias lazy VIDEO/IMAGE; `detectFromVideo`, `detectFromImage`; tipo `FaceAnalysisResult` |
+| `faceVisionService.ts` | Instancias lazy VIDEO/IMAGE; `detectFromVideo` (worker + fallback) y `detectFromImage` (worker + fallback); tipo `FaceAnalysisResult` |
 | `faceVisionWorkerClient.ts` | Worker Promise API + fallback main thread |
 | `workers/faceVision.worker.ts` | Inferencia MediaPipe off-thread |
 | `facePresenceDetector.ts` | Fachada: `detectVisibleFacePose`, tipos legacy, fallback `hasHumanLikeFrame` |
@@ -165,6 +165,8 @@ npm run build
 ```
 
 Verificación 2026-06-25 (frontend-first reto): **OK** (tsc + vite build). Worker bundle: `dist/assets/faceVision.worker-*.js`.
+
+Verificación 2026-06-25 (detectFromVideo worker): **OK** (`npm run build`). `detectFromVideo` usa `createImageBitmap` + worker; registro precalienta con `initFaceVisionWorker` en paso guía.
 
 ## Documentos relacionados
 

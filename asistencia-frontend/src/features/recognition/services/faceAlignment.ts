@@ -1,5 +1,6 @@
 import type { FaceAlignmentRuntimeConfig } from './faceAlignmentConfig'
 import { DEFAULT_FACE_COVERAGE_CONFIG, toRuntimeConfig } from './faceAlignmentConfig'
+import { expectedEnrollmentPose, type EnrollmentCaptureAngle } from './facePoseResolver'
 import type { FaceBox, FacePose } from './facePresenceDetector'
 
 export type FaceAlignment =
@@ -39,6 +40,28 @@ export function evaluateFaceAlignment(
   if (offCenterX || offCenterY) return 'off_center'
 
   if (expectedPose && pose !== expectedPose) return 'wrong_pose'
+  return 'aligned'
+}
+
+export function evaluateEnrollmentAlignment(
+  box: FaceBox,
+  pose: FacePose,
+  angle: EnrollmentCaptureAngle,
+  config: FaceAlignmentRuntimeConfig,
+  mirrorSelfie: boolean,
+): FaceAlignment {
+  if (box.width < config.minFaceWidth) return 'too_far'
+  if (box.width > config.maxFaceWidth) return 'too_close'
+
+  if (angle === 'front') {
+    const tolerance = config.centerToleranceFront
+    const offCenterX = Math.abs(box.centerX - 0.5) > tolerance
+    const offCenterY = Math.abs(box.centerY - config.centerTargetY) > tolerance + 0.06
+    if (offCenterX || offCenterY) return 'off_center'
+  }
+
+  const expectedPose = expectedEnrollmentPose(angle, mirrorSelfie)
+  if (pose !== expectedPose) return 'wrong_pose'
   return 'aligned'
 }
 

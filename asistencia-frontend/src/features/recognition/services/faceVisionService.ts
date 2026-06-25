@@ -226,6 +226,23 @@ export async function detectFromVideo(
     return emptyAnalysisResult()
   }
 
+  try {
+    const bitmap = await createImageBitmap(video)
+    const { detectFromVideoViaWorker } = await import('./faceVisionWorkerClient')
+
+    try {
+      const workerResult = await detectFromVideoViaWorker(bitmap, timestampMs)
+      if (workerResult !== null) return workerResult
+    } catch {
+    }
+
+    try {
+      bitmap.close()
+    } catch {
+    }
+  } catch {
+  }
+
   return detectFromVideoMainThread(video, timestampMs)
 }
 

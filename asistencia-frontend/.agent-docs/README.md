@@ -44,7 +44,7 @@ Documentacion tecnica de features implementadas en `asistencia-frontend`. Manten
 | 2026-06-25 | Guia estilo bancario (silueta SVG, scrim, anillo) | `face-position-guide.md` |
 | 2026-06-25 | Alineacion obligatoria antes del reto activo | `face-vision-unified.md`, `face-recognition-active-challenge.md` |
 | 2026-06-25 | Banda too_close = min(objetivo x 1.35, 75%) | `face-position-guide.md`, `face-registration-ux.md` |
-| 2026-06-25 | Panel admin por secciones (cobertura, guias, reto, avanzado) | `face-config-panel-ux.md` |
+| 2026-06-25 | Giros laterales en registro (mirrorSelfie + resolveFacePose) | `face-registration-ux.md` |
 
 ## Verificacion habitual
 

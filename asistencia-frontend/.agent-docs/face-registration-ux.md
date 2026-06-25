@@ -14,13 +14,14 @@ Tabs (Existente / Nuevo)
 ```
 
 - La cámara solo se enciende en `guide` y `capture` (`active` del hook). En `review` y `success` se apaga.
+- Al entrar a `guide`, se precalienta el worker de visión (`initFaceVisionWorker`) antes de iniciar el loop de detección; el botón **Iniciar registro** permanece en loading hasta `visionReady`.
 - Al completar los 3 ángulos en `capture`, se pasa automáticamente a `review`.
 
 ## Arquitectura
 
 | Pieza | Responsabilidad |
 |-------|-----------------|
-| [`hooks/useFaceEnrollment.ts`](../src/features/personnel/hooks/useFaceEnrollment.ts) | Lógica: cámara, loop de detección, estimación de pose, gating de calidad, countdown, captura/recaptura por ángulo, mensajes. Expone estado + handlers (sin JSX). |
+| [`hooks/useFaceEnrollment.ts`](../src/features/personnel/hooks/useFaceEnrollment.ts) | Lógica: cámara, precalentamiento worker, loop de detección, estimación de pose, gating de calidad, countdown, captura/recaptura por ángulo, mensajes. Expone `visionReady` + handlers (sin JSX). |
 | [`registration/CameraStage.tsx`](../src/features/personnel/components/registration/CameraStage.tsx) | Video 16:9 espejado (selfie) + guía de posición + overlay + región de estado `aria-live` + selector de cámara. |
 | [`recognition/components/FacePositionGuide.tsx`](../src/features/recognition/components/FacePositionGuide.tsx) | Orquesta óvalo objetivo, flechas animadas y barra de zonas (configurable en admin). |
 | [`recognition/components/FaceBoxOverlay.tsx`](../src/features/recognition/components/FaceBoxOverlay.tsx) | Caja rectangular opcional sobre el rostro detectado; color por estado. |
@@ -38,10 +39,10 @@ En `useFaceEnrollment`, por cada frame (cada `280 ms`):
 
 1. `detectVisibleFacePose(video)` → `{ visible, pose, box }`.
 2. Sin `box` real ⇒ estado `searching` (no captura).
-3. Con `box`: `evaluateFaceAlignment(box, pose, angle)`:
+3. Con `box`: `resolveFacePose(...)` + `evaluateEnrollmentAlignment(box, pose, angle, config, mirrorSelfiePerspective)`:
    - `too_far` / `too_close` por **ancho del rostro** (`minFaceWidth` = objetivo; `maxFaceWidth` = `min(objetivo × upperWidthRatio, 75%)`).
-   - `off_center` por centrado (tolerancia `0.16` frontal, `0.30` en giros).
-   - `wrong_pose` si la pose no coincide con el ángulo objetivo.
+   - `off_center` solo en ángulo **frontal** (tolerancia `0.10`); en perfiles izquierda/derecha no se exige centrado.
+   - `wrong_pose` si la pose resuelta no coincide con `expectedEnrollmentPose(angle, mirrorSelfiePerspective)`.
    - `aligned` en caso correcto.
 4. Si `aligned` y `autoCapture`: se exige mantener la posición `1500 ms` (countdown 3‑2‑1) antes de capturar.
 5. Botón **Capturar ahora** fuerza la captura del ángulo actual (respaldo manual).
@@ -50,7 +51,18 @@ La identidad final siempre la valida el backend DJL; este gating es solo guía d
 
 ## Espejo (selfie)
 
-El `<video>` se muestra con `-scale-x-100`. El overlay invierte la coordenada X (`1 - centerX`) para alinear el recuadro con la imagen espejada. La detección de pose usa el frame crudo (sin espejo), por lo que las instrucciones izquierda/derecha mantienen el mismo comportamiento físico que ya validaba el backend.
+El `<video>` se muestra con `-scale-x-100`. El overlay invierte la coordenada X (`1 - centerX`) para alinear el recuadro con la imagen espejada.
+
+El registro usa el mismo toggle **`mirrorSelfiePerspective`** del config de reto activo (`giga-face-challenge-config`):
+
+| `mirrorSelfiePerspective` | Instrucción "gira a tu izquierda" | Pose detectada esperada |
+|---------------------------|-----------------------------------|-------------------------|
+| `true` (recomendado con video espejado) | Giro hacia la izquierda en pantalla | `right` (frame crudo) |
+| `false` | Giro físico/cámara a la izquierda | `left` |
+
+Archivos: [`facePoseResolver.ts`](../src/features/recognition/services/facePoseResolver.ts), [`faceAlignment.ts`](../src/features/recognition/services/faceAlignment.ts) (`evaluateEnrollmentAlignment`), [`useFaceEnrollment.ts`](../src/features/personnel/hooks/useFaceEnrollment.ts).
+
+La pose se resuelve con `resolveFacePose` (landmarks 2D o yaw 3D según `usePose3d` y umbrales del reto).
 
 ## Registro (sin cambios de backend)
 
@@ -178,6 +190,17 @@ En [`faceCaptureConfig.ts`](../src/config/faceCaptureConfig.ts): `max 1280×720`
 - Banda too_close: `maxFaceWidth = min(objetivo x upperWidthRatio, 75%)`; alineacion previa al reto documentada en `face-recognition-active-challenge.md`.
 - Ratio superior configurable por flujo (`upperWidthRatio`) en Configuracion facial.
 - Centrado frontal: tolerancia fija `centerToleranceFront = 0.10` (±10% del frame). Reemplaza tanto el 16% previo (demasiado permisivo) como el ajuste a silueta (demasiado estricto, ~1.5% de margen).
+- Giros laterales en registro: `evaluateEnrollmentAlignment` + `resolveFacePose` + `mirrorSelfiePerspective` del config de reto activo.
+
+## Build verification (2026-06-25, worker registro)
+
+- `npm run build` — OK
+- `detectFromVideo` enruta inferencia al Web Worker (`createImageBitmap` + fallback main thread).
+- Registro precalienta el worker en paso `guide`; botón **Iniciar registro** deshabilitado con loading hasta `visionReady`.
+
+## Build verification (2026-06-25, giros registro)
+
+- `npm run build` — OK
 
 ## Build verification (2026-06-23)
 

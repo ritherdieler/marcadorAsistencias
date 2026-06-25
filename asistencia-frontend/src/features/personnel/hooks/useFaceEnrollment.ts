@@ -5,8 +5,10 @@ import { createMonotonicProgress } from '../../../utils/monotonicProgress'
 import { yieldToUi } from '../../../utils/yieldToUi'
 import { captureFacePhoto } from '../../recognition/services/cameraEvidence'
 import { detectVisibleFacePose, type FaceBox, type FaceLandmarkPoint } from '../../recognition/services/facePresenceDetector'
-import { evaluateFaceAlignment, faceAlignmentMessage, type FaceAlignment } from '../../recognition/services/faceAlignment'
+import { evaluateEnrollmentAlignment, faceAlignmentMessage, type FaceAlignment } from '../../recognition/services/faceAlignment'
+import { useFaceChallengeConfig } from '../../recognition/hooks/useFaceChallengeConfig'
 import { useFaceCoverageConfig } from '../../recognition/hooks/useFaceCoverageConfig'
+import { resolveFacePose } from '../../recognition/services/facePoseResolver'
 
 export type CaptureAngle = 'front' | 'left' | 'right'
 
@@ -56,6 +58,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
     landmarkAlignmentColors,
     landmarkLayers,
   } = useFaceCoverageConfig()
+  const { config: challengeConfig } = useFaceChallengeConfig()
   const alignmentConfig = getRuntimeConfig('registration')
   const { videoRef, stream, error: cameraError, permissionDenied, start, stop } = useCamera()
 
@@ -70,6 +73,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
   const [capturing, setCapturing] = useState(false)
   const [captureProgress, setCaptureProgress] = useState(0)
   const [statusMessage, setStatusMessage] = useState('Activando camara...')
+  const [visionReady, setVisionReady] = useState(false)
 
   const capturesRef = useRef(captures)
   const currentAngleRef = useRef(currentAngle)
@@ -149,14 +153,41 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
       setAlignment('searching')
       setCountdown(null)
       alignedSinceRef.current = null
+      setVisionReady(false)
       setStatusMessage('Camara apagada.')
       return
     }
 
+    let cancelled = false
+    setVisionReady(false)
+    setStatusMessage('Preparando deteccion facial...')
+
+    void (async () => {
+      await yieldToUi()
+      const { initFaceVisionWorker } = await import('../../recognition/services/faceVisionWorkerClient')
+      const ready = await initFaceVisionWorker()
+      if (cancelled) return
+      setVisionReady(ready)
+      if (ready) {
+        setStatusMessage((current) =>
+          current === 'Preparando deteccion facial...' ? 'Activando camara...' : current,
+        )
+      } else {
+        setStatusMessage('No se pudo preparar la deteccion facial.')
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [active, stop])
+
+  useEffect(() => {
+    if (!active) return
+
     if (stream) return
-    setStatusMessage('Activando camara...')
     void start(deviceId ?? undefined).catch(() => {})
-  }, [active, deviceId, start, stop, stream])
+  }, [active, deviceId, start, stream])
 
   useEffect(() => {
     if (!stream) return
@@ -167,7 +198,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
   }, [stream])
 
   useEffect(() => {
-    if (!active || !stream) return
+    if (!active || !stream || !visionReady) return
 
     let cancelled = false
 
@@ -194,7 +225,21 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
         setFaceBox(result.box)
         setLandmarks(result.landmarks ?? null)
         const angle = currentAngleRef.current
-        const quality = evaluateFaceAlignment(result.box, result.pose, angle, alignmentConfig)
+        const detectedPose = resolveFacePose(
+          {
+            pose: result.pose,
+            pose3d: result.pose3d,
+            landmarks: result.landmarks,
+          },
+          challengeConfig,
+        )
+        const quality = evaluateEnrollmentAlignment(
+          result.box,
+          detectedPose,
+          angle,
+          alignmentConfig,
+          challengeConfig.mirrorSelfiePerspective,
+        )
         setAlignment(quality)
 
         if (quality !== 'aligned') {
@@ -243,7 +288,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [active, alignmentConfig, stream, doCapture, videoRef])
+  }, [active, alignmentConfig, challengeConfig, stream, visionReady, doCapture, videoRef])
 
   useEffect(() => releasePreviews, [releasePreviews])
 
@@ -331,6 +376,7 @@ export function useFaceEnrollment({ active, autoCapture }: UseFaceEnrollmentOpti
     capturing,
     captureProgress,
     statusMessage,
+    visionReady,
     capturedCount,
     isComplete,
     canManualCapture,

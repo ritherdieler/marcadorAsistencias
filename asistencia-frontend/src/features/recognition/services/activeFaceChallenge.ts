@@ -1,8 +1,4 @@
-import {
-  estimateFacePoseFromLandmarks,
-  type FacePose,
-  type FacePose3d,
-} from './facePose3d'
+import type { FacePose } from './facePose3d'
 import {
   buildEnabledChallengeSteps,
   loadFaceChallengeConfig,
@@ -10,7 +6,11 @@ import {
   type FaceChallengeConfig,
   type FaceChallengeStepId,
 } from './faceChallengeConfig'
-import type { FaceLandmarkPoint } from './facePresenceDetector'
+import {
+  expectedTurnPose,
+  resolveFacePose,
+  type FacePoseAnalysisInput,
+} from './facePoseResolver'
 
 export type FaceChallengeType = 'LEFT_TURN' | 'RIGHT_TURN'
 export type FaceChallengeStage = FaceChallengeStepId | 'passed'
@@ -21,10 +21,7 @@ export interface FaceChallengeStep {
   prompt: string
 }
 
-export type FaceAnalysisInput = {
-  pose: FacePose
-  pose3d?: FacePose3d
-  landmarks?: FaceLandmarkPoint[]
+export type FaceAnalysisInput = FacePoseAnalysisInput & {
   blinkScore?: number
   blinkCycleComplete?: boolean
 }
@@ -46,40 +43,6 @@ export interface ActiveFaceChallenge {
   submitAnalysis: (input: FaceAnalysisInput) => FaceChallengeStep
   submitPose: (pose: FacePose) => FaceChallengeStep
   reset: () => void
-}
-
-function expectedTurnPose(type: FaceChallengeType, mirror: boolean): FacePose {
-  if (type === 'LEFT_TURN') {
-    return mirror ? 'right' : 'left'
-  }
-  return mirror ? 'left' : 'right'
-}
-
-function resolvePose(input: FaceAnalysisInput, config: FaceChallengeConfig): FacePose {
-  if (config.usePose3d && input.pose3d !== undefined) {
-    const { yaw } = input.pose3d
-    const absYaw = Math.abs(yaw)
-
-    if (absYaw <= config.thresholds.yawFrontDeg) {
-      return 'front'
-    }
-
-    if (yaw <= -config.thresholds.yawTurnDeg) {
-      return 'right'
-    }
-
-    if (yaw >= config.thresholds.yawTurnDeg) {
-      return 'left'
-    }
-
-    return 'unknown'
-  }
-
-  if (input.landmarks?.length) {
-    return estimateFacePoseFromLandmarks(input.landmarks)
-  }
-
-  return input.pose
 }
 
 function isStepSatisfied(
@@ -243,7 +206,7 @@ export function createActiveFaceChallenge(
     }
 
     const stepId = currentStepId()
-    const pose = resolvePose(input, config)
+    const pose = resolveFacePose(input, config)
 
     if (stepId === 'turn') {
       if (!turnCycleTypeAssigned && turnPhase === 'await_turn') {
