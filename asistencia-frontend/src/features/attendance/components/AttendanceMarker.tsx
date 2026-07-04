@@ -60,6 +60,7 @@ type IdentifiedPerson = {
 const FACE_LOST_CLEAR_MS = 900
 const FACE_CENTER_SHIFT_THRESHOLD = 0.18
 const FACE_SIZE_CHANGE_THRESHOLD = 0.45
+const SHOW_PASSWORD_ATTENDANCE_FALLBACK = false
 
 function getCurrentTimeLabel() {
   // Centraliza el formato de hora que se muestra cuando una marcacion queda pendiente.
@@ -1017,7 +1018,7 @@ export function AttendanceMarker() {
         </div>
       )}
 
-      {passwordFallbackOpen && (
+      {SHOW_PASSWORD_ATTENDANCE_FALLBACK && passwordFallbackOpen && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
           <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">
             <div className="h-2 bg-brand-orange" />
@@ -1148,16 +1149,18 @@ export function AttendanceMarker() {
               {cameraEnabled ? 'Apagar camara' : 'Encender camara'}
             </LoadingButton>
           )}
-          <LoadingButton
-            type="button"
-            variant="dark"
-            onClick={() => {
-              setMessage(null)
-              setPasswordFallbackOpen(true)
-            }}
-          >
-            Usar usuario y contrasena
-          </LoadingButton>
+          {SHOW_PASSWORD_ATTENDANCE_FALLBACK && (
+            <LoadingButton
+              type="button"
+              variant="dark"
+              onClick={() => {
+                setMessage(null)
+                setPasswordFallbackOpen(true)
+              }}
+            >
+              Usar usuario y contrasena
+            </LoadingButton>
+          )}
         </div>
       )}
 
