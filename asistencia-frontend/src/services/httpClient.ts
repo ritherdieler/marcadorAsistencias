@@ -1,7 +1,5 @@
 import axios from 'axios'
 
-import { env } from '../utils/env'
-
 type ConnectionReporter = {
   onError: () => void
   onSuccess: () => void
@@ -26,10 +24,8 @@ function isNetworkFailure(error: unknown): boolean {
   return false
 }
 
-const PROD_API_BASE_URL = 'https://api.gigafiberperu.cloud/ispadmin'
-
 const http = axios.create({
-  baseURL: env.apiBaseUrl ?? PROD_API_BASE_URL,
+  baseURL: 'https://api.gigafiberperu.cloud/ispadmin',
   timeout: 20000,
   withCredentials: true,
 })
