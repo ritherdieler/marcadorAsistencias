@@ -26,8 +26,10 @@ function isNetworkFailure(error: unknown): boolean {
   return false
 }
 
+const PROD_API_BASE_URL = 'https://api.gigafiberperu.cloud/ispadmin'
+
 const http = axios.create({
-  baseURL: env.apiBaseUrl ?? 'http://localhost:8080/ispadmin',
+  baseURL: env.apiBaseUrl ?? PROD_API_BASE_URL,
   timeout: 20000,
   withCredentials: true,
 })

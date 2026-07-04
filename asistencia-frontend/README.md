@@ -12,8 +12,14 @@ Frontend React + Tailwind para marcacion y administracion de asistencia.
 Crea un archivo `.env` en la raiz:
 
 ```bash
+# Desarrollo local:
 VITE_API_BASE_URL=http://localhost:8080/ispadmin
+
+# Produccion (URL actual desde 2026-07-04):
+# VITE_API_BASE_URL=https://api.gigafiberperu.cloud/ispadmin
 ```
+
+El archivo `.env` del repo ya apunta a produccion HTTPS. Para desarrollo local cambiar la variable.
 
 ## 3) Flujo facial
 

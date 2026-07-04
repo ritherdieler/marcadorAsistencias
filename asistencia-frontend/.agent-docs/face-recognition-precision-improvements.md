@@ -210,7 +210,7 @@ curl -s -X POST "http://localhost:8080/ispadmin/api/face-data/photo/check" \
 
 ## Production deploy (2026-06-24)
 
-Deployed to `212.85.13.47:8080/ispadmin` with ArcFace active (`application-prod.properties`).
+Deployed to `https://api.gigafiberperu.cloud/ispadmin` with ArcFace active (`application-prod.properties`).
 
 ```bash
 cd IdeaProjects/ispadmin-backend
@@ -222,8 +222,8 @@ bash scripts/deploy.sh --full     # upload tomcat-lib + rebuild container (first
 Production verification:
 
 ```bash
-curl -s http://212.85.13.47:8080/ispadmin/api/face-data/admin/embedding-inventory
-curl -s -X POST http://212.85.13.47:8080/ispadmin/api/face-data/photo/check -F "photo=@face.jpg"
+curl -s https://api.gigafiberperu.cloud/ispadmin/api/face-data/admin/embedding-inventory
+curl -s -X POST https://api.gigafiberperu.cloud/ispadmin/api/face-data/photo/check -F "photo=@face.jpg"
 # {"valid":true,"descriptorSize":512,"message":"Rostro detectado."}
 ```
 
