@@ -43,11 +43,10 @@ Kotlin binding: `FaceRecognitionProperties` + `FaceRecognitionConfiguration`.
 
 | Property | Value |
 |----------|-------|
-| `quality.min-image-size` | 160 |
-| `quality.min-brightness` | 20 |
+| `quality.min-brightness` | 14 (was 20) |
 | `quality.max-brightness` | 230 |
 | `quality.min-skin-ratio` | 0.008 |
-| `quality.min-edge-ratio` | 0.005 |
+| `quality.min-edge-ratio` | 0.003 (was 0.005) |
 
 ### Matching (cosine similarity normalized to [0,1])
 
@@ -58,9 +57,19 @@ Kotlin binding: `FaceRecognitionProperties` + `FaceRecognitionConfiguration`.
 | `matching.offline-threshold` | 0.84 (was 0.82) | Offline dataset endpoint |
 | `matching.offline-min-margin` | 0.06 (was 0.04) | Offline margin vs 2nd best user |
 | `matching.euclidean-threshold` | 0.48 | Legacy JSON descriptor endpoints |
-| `matching.cache-ttl-ms` | 60000 | Embedding cache TTL |
+| `matching.quality-weight-min` | 0.78 (was 0.85) | Floor for quality-weighted score adjustment |
 
-> **Camino A (tuning 2026-06-24):** raised the similarity threshold and (especially) the
+### Liveness (passive anti-spoof)
+
+| Property | Value |
+|----------|-------|
+| `liveness.enabled` | true |
+| `liveness.min-laplacian-variance` | 24 (was 35) |
+| `liveness.min-color-variance` | 9 (was 12) |
+
+> **Low-light tuning (2026-07-02):** relaxed quality gate, liveness texture thresholds, and
+> quality-weight floor so dark/blurry captures are less often rejected before matching.
+
 > inter-user margin to reduce misidentifications between similar faces. Higher margin means the
 > system abstains (returns "no reconocido") when the top two users are too close, instead of
 > guessing. Re-calibrate using the structured metrics file (see precision doc).

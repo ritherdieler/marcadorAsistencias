@@ -15,7 +15,26 @@ type AttendanceRow = AttendanceDto & {
   userDni: string
 }
 
-const ROWS_PER_PAGE = 10
+type SortKey = 'userDni' | 'userFullName' | 'checkIn' | 'checkOut' | 'method' | 'status'
+type SortDirection = 'asc' | 'desc'
+type SortState = {
+  key: SortKey
+  direction: SortDirection
+}
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const
+const DEFAULT_PAGE_SIZE = 10
+
+const DATE_WORDS_FORMATTER = new Intl.DateTimeFormat('es-PE', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+})
+
+const TIME_FORMATTER = new Intl.DateTimeFormat('es-PE', {
+  hour: 'numeric',
+  minute: '2-digit',
+})
 
 function toDate(value: string | number | null | undefined): Date | null {
   if (value === null || value === undefined) return null
@@ -26,7 +45,7 @@ function toDate(value: string | number | null | undefined): Date | null {
 
 function fmt(value: string | number | null | undefined): string {
   const date = toDate(value)
-  return date ? date.toLocaleString() : '-'
+  return date ? `${DATE_WORDS_FORMATTER.format(date)}, ${TIME_FORMATTER.format(date)}` : '-'
 }
 
 function buildFullName(user?: User): string {
@@ -54,13 +73,26 @@ function filterRows(rows: AttendanceRow[], from: string, to: string, dni: string
   })
 }
 
-function sortRowsByNewest(rows: AttendanceRow[]): AttendanceRow[] {
+function sortRows(rows: AttendanceRow[], sort: SortState): AttendanceRow[] {
   return [...rows].sort((a, b) => {
-    const aTime = toDate(a.checkIn)?.getTime() ?? 0
-    const bTime = toDate(b.checkIn)?.getTime() ?? 0
+    const direction = sort.direction === 'asc' ? 1 : -1
+    const result = compareRows(a, b, sort.key)
 
-    if (bTime !== aTime) return bTime - aTime
-    return b.id - a.id
+    if (result !== 0) return result * direction
+    return (b.id - a.id) * direction
+  })
+}
+
+function compareRows(a: AttendanceRow, b: AttendanceRow, key: SortKey): number {
+  if (key === 'checkIn' || key === 'checkOut') {
+    const aTime = toDate(a[key])?.getTime() ?? 0
+    const bTime = toDate(b[key])?.getTime() ?? 0
+    return aTime - bTime
+  }
+
+  return String(a[key] ?? '').localeCompare(String(b[key] ?? ''), 'es', {
+    numeric: true,
+    sensitivity: 'base',
   })
 }
 
@@ -143,6 +175,8 @@ export function AdminAttendancePage() {
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [errorDismissed, setErrorDismissed] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(DEFAULT_PAGE_SIZE)
+  const [sort, setSort] = useState<SortState>({ key: 'checkIn', direction: 'desc' })
 
   const attendanceQuery = useQuery({ queryKey: ['attendance', 'getAll'], queryFn: getAllAttendance })
   const usersQuery = useQuery({ queryKey: ['users', 'getAll'], queryFn: getAllUsers })
@@ -163,17 +197,17 @@ export function AdminAttendancePage() {
     })
   }, [attendanceQuery.data, usersById])
 
-  const filtered = useMemo(() => sortRowsByNewest(filterRows(rows, from, to, dni)), [rows, from, to, dni])
+  const filtered = useMemo(() => sortRows(filterRows(rows, from, to, dni), sort), [rows, from, to, dni, sort])
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE))
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const paginatedRows = useMemo(() => {
-    const start = (currentPage - 1) * ROWS_PER_PAGE
-    return filtered.slice(start, start + ROWS_PER_PAGE)
-  }, [currentPage, filtered])
+    const start = (currentPage - 1) * pageSize
+    return filtered.slice(start, start + pageSize)
+  }, [currentPage, filtered, pageSize])
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [from, to, dni])
+  }, [from, to, dni, pageSize, sort])
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages)
@@ -191,6 +225,39 @@ export function AdminAttendancePage() {
   const isLoading = attendanceQuery.isLoading || usersQuery.isLoading
   const isFetching = attendanceQuery.isFetching || usersQuery.isFetching
   const hasError = attendanceQuery.isError || usersQuery.isError
+
+  function changeSort(key: SortKey) {
+    setSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
+    }))
+  }
+
+  function sortLabel(key: SortKey): string {
+    if (sort.key !== key) return 'Ordenar'
+    return sort.direction === 'asc' ? 'Orden ascendente' : 'Orden descendente'
+  }
+
+  function sortIndicator(key: SortKey): string {
+    if (sort.key !== key) return ''
+    return sort.direction === 'asc' ? ' ↑' : ' ↓'
+  }
+
+  function SortableHeader({ label, sortKey }: { label: string; sortKey: SortKey }) {
+    return (
+      <th className="px-4 py-3">
+        <button
+          type="button"
+          onClick={() => changeSort(sortKey)}
+          aria-label={`${sortLabel(sortKey)} por ${label}`}
+          className="inline-flex items-center gap-1 font-bold uppercase tracking-wide text-slate-600 transition hover:text-brand-blue"
+        >
+          <span>{label}</span>
+          <span className="w-3 text-brand-blue">{sortIndicator(sortKey)}</span>
+        </button>
+      </th>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -301,12 +368,12 @@ export function AdminAttendancePage() {
         <table className="min-w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-600">
             <tr>
-              <th className="px-4 py-3">DNI</th>
-              <th className="px-4 py-3">Usuario</th>
-              <th className="px-4 py-3">Ingreso</th>
-              <th className="px-4 py-3">Salida</th>
-              <th className="px-4 py-3">Metodo</th>
-              <th className="px-4 py-3">Estado</th>
+              <SortableHeader label="DNI" sortKey="userDni" />
+              <SortableHeader label="Usuario" sortKey="userFullName" />
+              <SortableHeader label="Ingreso" sortKey="checkIn" />
+              <SortableHeader label="Salida" sortKey="checkOut" />
+              <SortableHeader label="Metodo" sortKey="method" />
+              <SortableHeader label="Estado" sortKey="status" />
             </tr>
           </thead>
           <tbody>
@@ -343,13 +410,32 @@ export function AdminAttendancePage() {
         </table>
       </div>
 
-      {filtered.length > ROWS_PER_PAGE && (
+      {filtered.length > 0 && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-slate-500">
-            Mostrando {(currentPage - 1) * ROWS_PER_PAGE + 1}-
-            {Math.min(currentPage * ROWS_PER_PAGE, filtered.length)} de {filtered.length} asistencias
-          </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+            <p className="text-sm text-slate-500">
+              Mostrando {(currentPage - 1) * pageSize + 1}-
+              {Math.min(currentPage * pageSize, filtered.length)} de {filtered.length} asistencias
+            </p>
 
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <span>Ver</span>
+              <select
+                value={pageSize}
+                onChange={(event) => setPageSize(Number(event.target.value) as (typeof PAGE_SIZE_OPTIONS)[number])}
+                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-brand-blue/20"
+              >
+                {PAGE_SIZE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+              <span>por pagina</span>
+            </label>
+          </div>
+
+          {totalPages > 1 && (
           <div className="flex flex-wrap justify-end gap-2">
             <button
               type="button"
@@ -385,6 +471,7 @@ export function AdminAttendancePage() {
               Siguiente
             </button>
           </div>
+          )}
         </div>
       )}
     </div>

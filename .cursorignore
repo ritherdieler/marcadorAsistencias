@@ -1,0 +1,14 @@
+**/build/
+**/target/
+**/node_modules/
+**/dist/
+**/.gradle/
+**/.kotlin/
+**/logs/
+**/*.log
+**/.DS_Store
+**/.idea/
+**/.vite/
+**/asistencia-frontend/public/models/
+**/asistencia-frontend/public/onnxruntime/
+**/asistencia-frontend/public/mediapipe/
