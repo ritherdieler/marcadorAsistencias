@@ -148,7 +148,7 @@ export function FaceCoveragePreview({
       : `Ancho detectado: — · Banda: ${targetWidthPercent}–${maxTargetWidthPercent}% · ratio ${flowSettings.upperWidthRatio.toFixed(2)}x`
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 rr-block">
       <div>
         <h2 className="text-lg font-bold text-slate-950">Vista previa en vivo</h2>
         <p className="mt-1 text-sm text-slate-600">

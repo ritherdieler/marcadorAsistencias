@@ -29,6 +29,8 @@
     "onnxruntime-web": "^1.26.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-router-dom": "^7.15.0"
+    "react-router-dom": "^7.15.0",
+    "rrweb": "^2.1.0",
+    "web-vitals": "^5.3.0"
   }
 }

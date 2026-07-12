@@ -36,6 +36,7 @@ Documentacion tecnica de features implementadas en `asistencia-frontend`. Manten
 | [`network-status-ux.md`](network-status-ux.md) | Indicador online/offline y sincronizacion |
 | [`login-sha384.md`](login-sha384.md) | Login con hash SHA-384 |
 | [`vite-dev-cleanup.md`](vite-dev-cleanup.md) | Limpieza de cache Vite en dev |
+| [`observability-web-sdk.md`](observability-web-sdk.md) | SDK web de observabilidad (errores, breadcrumbs, rrweb), bloqueo biometrico y `VITE_OBS_*` |
 
 ## Cambios recientes (referencia rapida)
 
@@ -45,6 +46,7 @@ Documentacion tecnica de features implementadas en `asistencia-frontend`. Manten
 | 2026-06-25 | Alineacion obligatoria antes del reto activo | `face-vision-unified.md`, `face-recognition-active-challenge.md` |
 | 2026-06-25 | Banda too_close = min(objetivo x 1.35, 75%) | `face-position-guide.md`, `face-registration-ux.md` |
 | 2026-06-25 | Giros laterales en registro (mirrorSelfie + resolveFacePose) | `face-registration-ux.md` |
+| 2026-07-11 | SDK web de observabilidad + Session Replay con bloqueo biometrico | `observability-web-sdk.md` |
 
 ## Verificacion habitual
 

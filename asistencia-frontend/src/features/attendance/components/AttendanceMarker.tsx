@@ -891,7 +891,7 @@ export function AttendanceMarker() {
               : status
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 rr-block">
       <ProcessingOverlay
         open={capturePhase !== 'idle'}
         title={captureOverlayTitle}

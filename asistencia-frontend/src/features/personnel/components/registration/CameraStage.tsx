@@ -79,7 +79,7 @@ export function CameraStage({
   const showVideo = active && !permissionDenied
 
   return (
-    <div>
+    <div className="rr-block">
       <div className="text-[11px] font-bold tracking-widest text-brand-blue/80">VALIDACION BIOMETRICA</div>
 
       <div className="relative mt-3 aspect-video overflow-hidden rounded-xl bg-slate-950 ring-1 ring-black/10">

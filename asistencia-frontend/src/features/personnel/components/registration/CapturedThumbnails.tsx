@@ -28,7 +28,7 @@ export function CapturedThumbnails({
   showRecapture = true,
 }: CapturedThumbnailsProps) {
   return (
-    <ul className="grid grid-cols-3 gap-3">
+    <ul className="grid grid-cols-3 gap-3 rr-block">
       {ENROLLMENT_ANGLES.map((angle) => {
         const state = captures[angle.key]
         const isCurrent = currentAngle === angle.key && !state.blob
