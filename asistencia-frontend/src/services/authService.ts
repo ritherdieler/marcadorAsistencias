@@ -1,6 +1,7 @@
 import { http } from './httpClient'
 import type { User } from '../types/user'
 import { encryptWithSHA384 } from '../utils/sha384'
+import { setAuthTokens } from '../features/auth/utils/authStorage'
 
 export interface LoginRequest {
   username: string // Usuario/login
@@ -15,5 +16,6 @@ export async function login(req: LoginRequest): Promise<LoginResponse> {
     username: req.username,
     password: await encryptWithSHA384(req.password),
   })
+  setAuthTokens(data.accessToken, data.refreshToken)
   return data
 }

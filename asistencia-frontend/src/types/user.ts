@@ -11,4 +11,6 @@ export interface User {
   phone?: string | null
   verified?: boolean
   type?: UserType | null
+  accessToken?: string | null
+  refreshToken?: string | null
 }

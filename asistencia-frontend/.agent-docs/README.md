@@ -35,6 +35,7 @@ Documentacion tecnica de features implementadas en `asistencia-frontend`. Manten
 | [`backend-face-endpoints.md`](backend-face-endpoints.md) | Endpoints REST faciales del backend |
 | [`network-status-ux.md`](network-status-ux.md) | Indicador online/offline y sincronizacion |
 | [`login-sha384.md`](login-sha384.md) | Login con hash SHA-384 |
+| [`auth-token-refresh.md`](auth-token-refresh.md) | Autenticacion Bearer + refresh de token y manejo de 401 |
 | [`vite-dev-cleanup.md`](vite-dev-cleanup.md) | Limpieza de cache Vite en dev |
 | [`observability-web-sdk.md`](observability-web-sdk.md) | SDK web de observabilidad (errores, breadcrumbs, rrweb), bloqueo biometrico y `VITE_OBS_*` |
 
@@ -47,6 +48,7 @@ Documentacion tecnica de features implementadas en `asistencia-frontend`. Manten
 | 2026-06-25 | Banda too_close = min(objetivo x 1.35, 75%) | `face-position-guide.md`, `face-registration-ux.md` |
 | 2026-06-25 | Giros laterales en registro (mirrorSelfie + resolveFacePose) | `face-registration-ux.md` |
 | 2026-07-11 | SDK web de observabilidad + Session Replay con bloqueo biometrico | `observability-web-sdk.md` |
+| 2026-07-13 | Autenticacion Bearer, persistencia de tokens y refresh en 401 | `auth-token-refresh.md` |
 
 ## Verificacion habitual
 

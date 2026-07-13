@@ -5,6 +5,7 @@ import { resetOfflineFaceDatasetState } from './offlineFaceDataset'
 const LOCAL_STORAGE_KEYS = [
   'auth_user',
   'auth_token',
+  'refresh_token',
   'giga-attendance-checked-in-users',
   'giga-face-offline-secret',
 ] as const
