@@ -10,7 +10,18 @@ type ConnectionReporter = {
 type RetryableConfig = InternalAxiosRequestConfig & { _retry?: boolean }
 
 const LOGIN_ROUTE = '/login'
-const PUBLIC_PATHS = ['/users/login', '/users/token/refresh']
+const TERMINAL_ROUTE = '/terminal'
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'https://api.gigafiberperu.cloud/ispadmin'
+const PUBLIC_PATHS = [
+  '/users/login',
+  '/users/token/refresh',
+  '/api/face-data/offline-dataset',
+  '/api/face/challenge/start',
+  '/api/face/identify',
+  '/api/face/verify',
+  '/api/face/attendance/offline-sync',
+  '/api/face/evidence',
+]
 
 let connectionReporter: ConnectionReporter | null = null
 
@@ -37,7 +48,7 @@ function isPublicPath(url?: string): boolean {
 }
 
 const http = axios.create({
-  baseURL: 'https://api.gigafiberperu.cloud/ispadmin',
+  baseURL: API_BASE_URL,
   timeout: 20000,
   withCredentials: true,
 })
@@ -76,9 +87,10 @@ function refreshAccessToken(): Promise<string> {
 }
 
 function redirectToLogin() {
-  if (typeof window !== 'undefined' && window.location.pathname !== LOGIN_ROUTE) {
-    window.location.assign(LOGIN_ROUTE)
-  }
+  if (typeof window === 'undefined') return
+  const pathname = window.location.pathname
+  if (pathname === LOGIN_ROUTE || pathname === TERMINAL_ROUTE) return
+  window.location.assign(LOGIN_ROUTE)
 }
 
 http.interceptors.response.use(

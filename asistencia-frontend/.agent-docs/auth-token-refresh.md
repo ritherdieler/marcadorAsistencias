@@ -10,9 +10,21 @@ Build verified: `npm run build` (2026-07-13).
 ## Contrato del backend
 
 - `POST /users/login` (`{username, password: SHA-384}`) devuelve `UserDto` con `accessToken` y `refreshToken`.
-- Todas las demas llamadas requieren `Authorization: Bearer <accessToken>`.
+- Las llamadas de administracion requieren `Authorization: Bearer <accessToken>`.
 - En `401`: `POST /users/token/refresh` (`{refreshToken}`) devuelve `{accessToken, refreshToken}`; se reintenta la request original.
-- Rutas publicas (sin token): `/users/login`, `/users/token/refresh`.
+
+## Rutas publicas vs protegidas
+
+La marcacion de asistencia (`/terminal`) funciona sin token; la administracion (`/admin/*`) requiere sesion.
+El backend aplica esta separacion en `PlatformAuthFilter.isAttendancePublicPath()` y el frontend la replica en `PUBLIC_PATHS` de `httpClient.ts`.
+
+| Area | Endpoints | Token |
+|---|---|---|
+| Sesion | `/users/login`, `/users/token/refresh` | No |
+| Marcacion | `/api/face-data/offline-dataset`, `/api/face/challenge/start`, `/api/face/identify(/photo)`, `/api/face/verify(/photo|/password)`, `/api/face/attendance/offline-sync`, `/api/face/evidence` | No |
+| Administracion | `/users`, `/api/attendance/*`, `/api/face-data` (resto: `/photo`, `/photo/check`, `/photo/enroll*`, `/user/{id}/exists`, `/admin/*`) | Si (Bearer) |
+
+Nota: el interceptor de `401` no redirige a `/login` cuando el usuario esta en `/terminal`, para no interrumpir la marcacion ante fallos de refresh.
 
 ## Persistencia (`localStorage`)
 
