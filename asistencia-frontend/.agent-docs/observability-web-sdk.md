@@ -94,3 +94,7 @@ npm run build
 ```
 
 OK 2026-07-11.
+
+## Reversion Infisical (2026-07-16)
+
+Se elimino el spike de Infisical: `npm run dev` / `npm run build` vuelven a Vite/`tsc` directo; las keys `VITE_OBS_*` se leen de `.env*`.

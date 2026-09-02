@@ -1,6 +1,6 @@
 # Indice de documentacion del agente
 
-Documentacion tecnica de features implementadas en `asistencia-frontend`. Mantener actualizado al cerrar cada tarea (ver regla `.cursor/rules/agent-docs.mdc`).
+Documentacion tecnica de features implementadas en `asistencia-frontend`. Mantener actualizado al cerrar cada tarea (ver `AGENTS.md`, sección «Documentación en .agent-docs»).
 
 ## Vision facial (nucleo)
 
@@ -49,6 +49,7 @@ Documentacion tecnica de features implementadas en `asistencia-frontend`. Manten
 | 2026-06-25 | Giros laterales en registro (mirrorSelfie + resolveFacePose) | `face-registration-ux.md` |
 | 2026-07-11 | SDK web de observabilidad + Session Replay con bloqueo biometrico | `observability-web-sdk.md` |
 | 2026-07-13 | Autenticacion Bearer, persistencia de tokens y refresh en 401 | `auth-token-refresh.md` |
+| 2026-07-16 | Reversion spike Infisical; scripts npm y `VITE_OBS_*` locales | `observability-web-sdk.md` |
 
 ## Verificacion habitual
 
