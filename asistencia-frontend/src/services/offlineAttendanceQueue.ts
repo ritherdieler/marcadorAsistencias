@@ -1,5 +1,10 @@
 import { identifyFacePhoto, saveFaceEvidence, syncOfflineFaceAttendance, verifyFacePhoto } from './recognitionService'
+import {
+  isUserRequiredToMark,
+  loadAttendanceMarkingConfig,
+} from '../features/settings/services/attendanceMarkingConfig'
 import { forgetLocalCheckIn, rememberLocalCheckIn } from './localAttendanceState'
+import type { AttendanceStatus } from '../features/settings/services/attendanceScheduleConfig'
 
 type OfflineAttendanceAction = 'AUTO' | 'CHECK_IN' | 'CHECK_OUT'
 type AttendanceSyncAction = Exclude<OfflineAttendanceAction, 'AUTO'>
@@ -11,6 +16,7 @@ export type OfflineAttendanceRecord = {
   userId?: number | null
   userName?: string | null
   faceDataId?: number | null
+  attendanceStatus?: AttendanceStatus | null
   score?: number | null
   createdAt: number
   lastError?: string | null
@@ -87,6 +93,10 @@ export function isConnectionError(error: unknown): boolean {
 }
 
 export async function enqueueOfflineAttendance(record: Omit<OfflineAttendanceRecord, 'id' | 'createdAt'>): Promise<void> {
+  if (record.userId && !isUserRequiredToMark(loadAttendanceMarkingConfig(), record.userId)) {
+    throw new Error('Usuario exento de marcacion en este equipo.')
+  }
+
   const queuedRecord: OfflineAttendanceRecord = {
     ...record,
     id: crypto.randomUUID(),
@@ -155,6 +165,7 @@ async function syncKnownOfflineRecord(record: OfflineAttendanceRecord, action: A
     userId: record.userId,
     action,
     occurredAtMillis: record.createdAt,
+    attendanceStatus: record.attendanceStatus ?? null,
     score: record.score ?? null,
     faceDataId: record.faceDataId ?? null,
   })
@@ -189,7 +200,7 @@ export async function syncOfflineAttendanceQueue(): Promise<{ synced: number; re
         let finalAction: AttendanceSyncAction = action
         let response = record.userId
           ? await syncKnownOfflineRecord(record, finalAction)
-          : await verifyFacePhoto(record.photo, finalAction, record.createdAt)
+          : await verifyFacePhoto(record.photo, finalAction, record.createdAt, record.attendanceStatus ?? undefined)
 
         // Si una salida offline ya fue sincronizada antes, el backend puede responder que no queda
         // ingreso abierto. En ese caso eliminamos el pendiente para evitar duplicar marcaciones.
@@ -205,7 +216,7 @@ export async function syncOfflineAttendanceQueue(): Promise<{ synced: number; re
           finalAction = 'CHECK_IN'
           response = record.userId
             ? await syncKnownOfflineRecord(record, finalAction)
-            : await verifyFacePhoto(record.photo, finalAction, record.createdAt)
+            : await verifyFacePhoto(record.photo, finalAction, record.createdAt, record.attendanceStatus ?? undefined)
         }
 
         if (!shouldTreatAsRegistered(finalAction, response)) {

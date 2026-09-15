@@ -1,6 +1,7 @@
 import type { User } from '../types/user'
 import { encryptWithSHA384 } from '../utils/sha384'
 import { http } from './httpClient'
+import type { AttendanceStatus } from '../features/settings/services/attendanceScheduleConfig'
 
 type FaceAction = 'CHECK_IN' | 'CHECK_OUT'
 
@@ -50,6 +51,7 @@ export interface OfflineAttendanceSyncRequest {
   userId: number
   action: FaceAction
   occurredAtMillis: number
+  attendanceStatus?: AttendanceStatus | null
   score?: number | null
   faceDataId?: number | null
 }
@@ -75,6 +77,8 @@ export interface PasswordAttendanceRequest {
   username: string
   password: string
   action?: FaceAction
+  occurredAtMillis?: number
+  attendanceStatus?: AttendanceStatus | null
 }
 
 export interface FaceEvidenceRequest {
@@ -192,6 +196,7 @@ export async function verifyFacePhoto(
   photo: Blob,
   action: FaceAction,
   occurredAtMillis?: number,
+  attendanceStatus?: AttendanceStatus,
   challengeToken?: string | null,
 ): Promise<VerifyFaceResponse> {
   // Marca asistencia/salida enviando la foto; el backend valida el rostro y registra la accion.
@@ -201,6 +206,9 @@ export async function verifyFacePhoto(
   if (occurredAtMillis) {
     // Para marcaciones offline se envia la hora real de captura, no la hora de sincronizacion.
     formData.append('occurredAtMillis', String(occurredAtMillis))
+  }
+  if (attendanceStatus) {
+    formData.append('attendanceStatus', attendanceStatus)
   }
   if (challengeToken) {
     formData.append('challengeToken', challengeToken)

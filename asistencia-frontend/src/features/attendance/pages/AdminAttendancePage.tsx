@@ -6,16 +6,26 @@ import { LoadingButton } from '../../../components/ui/LoadingButton'
 import { ModalAlert } from '../../../components/ui/ModalAlert'
 import { getAllAttendance } from '../../../services/attendanceService'
 import { getAllUsers } from '../../../services/userService'
-import type { AttendanceDto } from '../../../types/attendance'
 import type { User } from '../../../types/user'
+import { useAttendanceHolidaysConfig } from '../../settings/hooks/useAttendanceHolidaysConfig'
+import { useAttendanceMarkingConfig } from '../../settings/hooks/useAttendanceMarkingConfig'
+import { toHolidayNameMap, toHolidaySet } from '../../settings/services/attendanceHolidaysConfig'
+import { toExemptUserIdSet } from '../../settings/services/attendanceMarkingConfig'
+import {
+  ATTENDANCE_REPORT_STATUS_LABEL,
+  buildAttendanceReportRows,
+  buildFullName,
+  filterAttendanceReportRows,
+  formatReportDate,
+  formatReportDateTime,
+  getDni,
+  summarizeAttendanceReport,
+  toLocalDateKey,
+  type AttendanceReportRow,
+  type AttendanceReportStatus,
+} from '../utils/attendanceReport'
 
-type AttendanceRow = AttendanceDto & {
-  user?: User
-  userFullName: string
-  userDni: string
-}
-
-type SortKey = 'userDni' | 'userFullName' | 'checkIn' | 'checkOut' | 'method' | 'status'
+type SortKey = 'dateKey' | 'userDni' | 'userFullName' | 'checkIn' | 'checkOut' | 'method' | 'reportStatus'
 type SortDirection = 'asc' | 'desc'
 type SortState = {
   key: SortKey
@@ -25,16 +35,60 @@ type SortState = {
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const
 const DEFAULT_PAGE_SIZE = 10
 
-const DATE_WORDS_FORMATTER = new Intl.DateTimeFormat('es-PE', {
-  day: 'numeric',
-  month: 'long',
-  year: 'numeric',
-})
+type PaginationItem = number | 'ellipsis'
 
-const TIME_FORMATTER = new Intl.DateTimeFormat('es-PE', {
-  hour: 'numeric',
-  minute: '2-digit',
-})
+function buildPaginationRange(currentPage: number, totalPages: number): PaginationItem[] {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1)
+  }
+
+  const items: PaginationItem[] = [1]
+  const left = Math.max(2, currentPage - 1)
+  const right = Math.min(totalPages - 1, currentPage + 1)
+
+  if (left > 2) items.push('ellipsis')
+
+  for (let page = left; page <= right; page += 1) {
+    items.push(page)
+  }
+
+  if (right < totalPages - 1) items.push('ellipsis')
+
+  items.push(totalPages)
+  return items
+}
+
+function isAbsenceLike(status: AttendanceReportStatus): boolean {
+  return status === 'FALTO' || status === 'FERIADO'
+}
+
+function statusBadgeClass(status: AttendanceReportStatus): string {
+  switch (status) {
+    case 'TARDANZA':
+      return 'bg-amber-100 text-amber-800'
+    case 'FALTO':
+      return 'bg-rose-100 text-rose-800'
+    case 'FERIADO':
+      return 'bg-violet-100 text-violet-800'
+    case 'MARCO':
+    default:
+      return 'bg-emerald-100 text-emerald-800'
+  }
+}
+
+function excelStatusClass(status: AttendanceReportStatus): string {
+  switch (status) {
+    case 'TARDANZA':
+      return 'late'
+    case 'FALTO':
+      return 'missing'
+    case 'FERIADO':
+      return 'holiday'
+    case 'MARCO':
+    default:
+      return 'ok'
+  }
+}
 
 function toDate(value: string | number | null | undefined): Date | null {
   if (value === null || value === undefined) return null
@@ -43,51 +97,38 @@ function toDate(value: string | number | null | undefined): Date | null {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
-function fmt(value: string | number | null | undefined): string {
-  const date = toDate(value)
-  return date ? `${DATE_WORDS_FORMATTER.format(date)}, ${TIME_FORMATTER.format(date)}` : '-'
-}
-
-function buildFullName(user?: User): string {
-  if (!user) return '-'
-  return [user.name, user.lastName].filter(Boolean).join(' ') || user.username || `Usuario ${user.id}`
-}
-
-function getDni(user?: User): string {
-  return user?.dni?.trim() || ''
-}
-
-function filterRows(rows: AttendanceRow[], from: string, to: string, dni: string): AttendanceRow[] {
-  const fromDate = from ? new Date(`${from}T00:00:00`) : null
-  const toDateValue = to ? new Date(`${to}T23:59:59`) : null
-  const dniQuery = dni.trim()
-
-  return rows.filter((row) => {
-    if (dniQuery && !row.userDni.includes(dniQuery)) return false
-
-    const checkIn = toDate(row.checkIn)
-    if (!checkIn) return false
-    if (fromDate && checkIn < fromDate) return false
-    if (toDateValue && checkIn > toDateValue) return false
-    return true
-  })
-}
-
-function sortRows(rows: AttendanceRow[], sort: SortState): AttendanceRow[] {
+function sortRows(rows: AttendanceReportRow[], sort: SortState): AttendanceReportRow[] {
   return [...rows].sort((a, b) => {
     const direction = sort.direction === 'asc' ? 1 : -1
     const result = compareRows(a, b, sort.key)
 
     if (result !== 0) return result * direction
-    return (b.id - a.id) * direction
+    const dateCmp = a.dateKey.localeCompare(b.dateKey)
+    if (dateCmp !== 0) return dateCmp * direction
+    return a.userFullName.localeCompare(b.userFullName, 'es', { sensitivity: 'base' }) * direction
   })
 }
 
-function compareRows(a: AttendanceRow, b: AttendanceRow, key: SortKey): number {
+function compareRows(a: AttendanceReportRow, b: AttendanceReportRow, key: SortKey): number {
   if (key === 'checkIn' || key === 'checkOut') {
     const aTime = toDate(a[key])?.getTime() ?? 0
     const bTime = toDate(b[key])?.getTime() ?? 0
     return aTime - bTime
+  }
+
+  if (key === 'reportStatus') {
+    return ATTENDANCE_REPORT_STATUS_LABEL[a.reportStatus].localeCompare(
+      ATTENDANCE_REPORT_STATUS_LABEL[b.reportStatus],
+      'es',
+      { sensitivity: 'base' },
+    )
+  }
+
+  if (key === 'method') {
+    return displayMethodCell(a).localeCompare(displayMethodCell(b), 'es', {
+      numeric: true,
+      sensitivity: 'base',
+    })
   }
 
   return String(a[key] ?? '').localeCompare(String(b[key] ?? ''), 'es', {
@@ -104,7 +145,21 @@ function escapeHtml(value: string | number): string {
     .replace(/"/g, '&quot;')
 }
 
-function toExcelHtml(rows: AttendanceRow[]): string {
+function displayTime(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return '-'
+  const formatted = formatReportDateTime(value)
+  return formatted === '-' ? '-' : formatted
+}
+
+function displayMethodCell(row: AttendanceReportRow): string {
+  if (row.reportStatus === 'FERIADO') {
+    return row.holidayName?.trim() || 'Feriado'
+  }
+  if (row.reportStatus === 'FALTO') return '-'
+  return row.method?.trim() ? row.method : '-'
+}
+
+function toExcelHtml(rows: AttendanceReportRow[]): string {
   const generatedAt = new Date().toLocaleString()
 
   return `
@@ -120,6 +175,9 @@ function toExcelHtml(rows: AttendanceRow[]): string {
           .meta { color: #475569; padding: 0 0 12px 0; }
           .ok { color: #047857; font-weight: 700; }
           .late { color: #b45309; font-weight: 700; }
+          .missing-out { color: #0369a1; font-weight: 700; }
+          .missing { color: #be123c; font-weight: 700; }
+          .holiday { color: #6d28d9; font-weight: 700; }
         </style>
       </head>
       <body>
@@ -128,8 +186,9 @@ function toExcelHtml(rows: AttendanceRow[]): string {
         <table>
           <thead>
             <tr>
+              <th>Fecha</th>
               <th>DNI</th>
-              <th>Usuario</th>
+              <th>Trabajador</th>
               <th>Ingreso</th>
               <th>Salida</th>
               <th>Metodo</th>
@@ -138,18 +197,25 @@ function toExcelHtml(rows: AttendanceRow[]): string {
           </thead>
           <tbody>
             ${rows
-              .map(
-                (row) => `
+              .map((row) => {
+                const absenceLike = isAbsenceLike(row.reportStatus)
+                const ingreso = absenceLike ? '-' : displayTime(row.checkIn)
+                const salida = absenceLike ? '-' : displayTime(row.checkOut)
+                const metodo = displayMethodCell(row)
+                const estado = ATTENDANCE_REPORT_STATUS_LABEL[row.reportStatus]
+
+                return `
                   <tr>
+                    <td>${escapeHtml(formatReportDate(row.dateKey))}</td>
                     <td>${escapeHtml(row.userDni || '-')}</td>
                     <td>${escapeHtml(row.userFullName)}</td>
-                    <td>${escapeHtml(fmt(row.checkIn))}</td>
-                    <td>${escapeHtml(fmt(row.checkOut))}</td>
-                    <td>${escapeHtml(row.method)}</td>
-                    <td class="${row.status === 'TARDANZA' ? 'late' : 'ok'}">${escapeHtml(row.status)}</td>
+                    <td>${escapeHtml(ingreso)}</td>
+                    <td>${escapeHtml(salida)}</td>
+                    <td>${escapeHtml(metodo)}</td>
+                    <td class="${excelStatusClass(row.reportStatus)}">${escapeHtml(estado)}</td>
                   </tr>
-                `,
-              )
+                `
+              })
               .join('')}
           </tbody>
         </table>
@@ -168,38 +234,58 @@ function downloadExcel(filename: string, html: string) {
   URL.revokeObjectURL(url)
 }
 
+function SummaryCard({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${tone}`}>
+      <div className="text-xs font-medium text-slate-600">{label}</div>
+      <div className="mt-0.5 text-xl font-bold text-slate-900">{value}</div>
+    </div>
+  )
+}
+
 export function AdminAttendancePage() {
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
+  const [from, setFrom] = useState(() => toLocalDateKey(new Date()))
+  const [to, setTo] = useState(() => toLocalDateKey(new Date()))
   const [dni, setDni] = useState('')
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [errorDismissed, setErrorDismissed] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(DEFAULT_PAGE_SIZE)
-  const [sort, setSort] = useState<SortState>({ key: 'checkIn', direction: 'desc' })
+  const [sort, setSort] = useState<SortState>({ key: 'dateKey', direction: 'desc' })
+
+  const { holidays } = useAttendanceHolidaysConfig()
+  const { config: markingConfig } = useAttendanceMarkingConfig()
+  const holidaySet = useMemo(() => toHolidaySet(holidays), [holidays])
+  const holidayNames = useMemo(() => toHolidayNameMap(holidays), [holidays])
+  const exemptUserIds = useMemo(() => toExemptUserIdSet(markingConfig), [markingConfig])
 
   const attendanceQuery = useQuery({ queryKey: ['attendance', 'getAll'], queryFn: getAllAttendance })
   const usersQuery = useQuery({ queryKey: ['users', 'getAll'], queryFn: getAllUsers })
 
-  const usersById = useMemo(() => {
-    return new Map((usersQuery.data ?? []).map((user) => [user.id, user]))
-  }, [usersQuery.data])
+  const rows = useMemo<AttendanceReportRow[]>(() => {
+    return buildAttendanceReportRows(
+      usersQuery.data ?? [],
+      attendanceQuery.data ?? [],
+      from,
+      to,
+      holidaySet,
+      holidayNames,
+      exemptUserIds,
+    )
+  }, [attendanceQuery.data, usersQuery.data, from, to, holidaySet, holidayNames, exemptUserIds])
 
-  const rows = useMemo<AttendanceRow[]>(() => {
-    return (attendanceQuery.data ?? []).map((attendance) => {
-      const user = usersById.get(attendance.userId)
-      return {
-        ...attendance,
-        user,
-        userFullName: buildFullName(user),
-        userDni: getDni(user),
-      }
-    })
-  }, [attendanceQuery.data, usersById])
+  const filtered = useMemo(
+    () => sortRows(filterAttendanceReportRows(rows, from, to, dni), sort),
+    [rows, from, to, dni, sort],
+  )
 
-  const filtered = useMemo(() => sortRows(filterRows(rows, from, to, dni), sort), [rows, from, to, dni, sort])
+  const summary = useMemo(() => summarizeAttendanceReport(filtered), [filtered])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const paginationItems = useMemo(
+    () => buildPaginationRange(currentPage, totalPages),
+    [currentPage, totalPages],
+  )
   const paginatedRows = useMemo(() => {
     const start = (currentPage - 1) * pageSize
     return filtered.slice(start, start + pageSize)
@@ -207,7 +293,7 @@ export function AdminAttendancePage() {
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [from, to, dni, pageSize, sort])
+  }, [from, to, dni, pageSize, sort, holidays, markingConfig])
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages)
@@ -218,7 +304,7 @@ export function AdminAttendancePage() {
     if (!query) return []
 
     return (usersQuery.data ?? [])
-      .filter((user) => getDni(user).includes(query))
+      .filter((user: User) => getDni(user).includes(query))
       .slice(0, 6)
   }, [dni, usersQuery.data])
 
@@ -240,7 +326,7 @@ export function AdminAttendancePage() {
 
   function sortIndicator(key: SortKey): string {
     if (sort.key !== key) return ''
-    return sort.direction === 'asc' ? ' ↑' : ' ↓'
+    return sort.direction === 'asc' ? ' ^' : ' v'
   }
 
   function SortableHeader({ label, sortKey }: { label: string; sortKey: SortKey }) {
@@ -263,7 +349,10 @@ export function AdminAttendancePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Asistencias</h1>
-        <p className="mt-1 text-sm text-slate-600">Visualiza registros y genera reportes con filtros.</p>
+        <p className="mt-1 text-sm text-slate-600">
+          Por defecto muestra el dia de hoy con todo el personal: quien marco y quien no marco (faltas) en la misma
+          tabla. Ajusta Desde/Hasta para otro rango.
+        </p>
       </div>
 
       <form
@@ -346,7 +435,7 @@ export function AdminAttendancePage() {
               className="w-full lg:w-40"
               onClick={() => {
                 const excel = toExcelHtml(filtered)
-                downloadExcel(`asistencias_${new Date().toISOString().slice(0, 10)}.xls`, excel)
+                downloadExcel(`asistencias_${toLocalDateKey(new Date())}.xls`, excel)
               }}
             >
               Exportar Excel
@@ -364,36 +453,46 @@ export function AdminAttendancePage() {
         />
       )}
 
+      {!isLoading && (
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <SummaryCard label="Total personal" value={summary.totalPersonal} tone="border-slate-200 bg-white" />
+          <SummaryCard label="Marcaron" value={summary.marcaron} tone="border-emerald-200 bg-emerald-50/60" />
+          <SummaryCard label="Faltaron" value={summary.faltaron} tone="border-rose-200 bg-rose-50/60" />
+          <SummaryCard label="Feriados" value={summary.feriados} tone="border-violet-200 bg-violet-50/60" />
+          <SummaryCard label="Tardanzas" value={summary.tardanzas} tone="border-amber-200 bg-amber-50/60" />
+        </div>
+      )}
+
       <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
         <table className="min-w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-600">
             <tr>
+              <SortableHeader label="Fecha" sortKey="dateKey" />
               <SortableHeader label="DNI" sortKey="userDni" />
-              <SortableHeader label="Usuario" sortKey="userFullName" />
+              <SortableHeader label="Trabajador" sortKey="userFullName" />
               <SortableHeader label="Ingreso" sortKey="checkIn" />
               <SortableHeader label="Salida" sortKey="checkOut" />
               <SortableHeader label="Metodo" sortKey="method" />
-              <SortableHeader label="Estado" sortKey="status" />
+              <SortableHeader label="Estado" sortKey="reportStatus" />
             </tr>
           </thead>
           <tbody>
             {paginatedRows.map((row) => (
-              <tr key={row.id} className="border-t">
+              <tr key={row.key} className="border-t">
+                <td className="px-4 py-3">{formatReportDate(row.dateKey)}</td>
                 <td className="px-4 py-3">{row.userDni || '-'}</td>
                 <td className="px-4 py-3">{row.userFullName}</td>
-                <td className="px-4 py-3">{fmt(row.checkIn)}</td>
-                <td className="px-4 py-3">{fmt(row.checkOut)}</td>
-                <td className="px-4 py-3">{row.method}</td>
+                <td className="px-4 py-3">{displayTime(row.checkIn)}</td>
+                <td className="px-4 py-3">{displayTime(row.checkOut)}</td>
+                <td className="px-4 py-3">{displayMethodCell(row)}</td>
                 <td className="px-4 py-3">
                   <span
                     className={[
                       'rounded-full px-2 py-1 text-xs font-bold',
-                      row.status === 'TARDANZA'
-                        ? 'bg-amber-100 text-amber-800'
-                        : 'bg-emerald-100 text-emerald-800',
+                      statusBadgeClass(row.reportStatus),
                     ].join(' ')}
                   >
-                    {row.status}
+                    {ATTENDANCE_REPORT_STATUS_LABEL[row.reportStatus]}
                   </span>
                 </td>
               </tr>
@@ -401,8 +500,10 @@ export function AdminAttendancePage() {
 
             {!isLoading && filtered.length === 0 && (
               <tr className="border-t">
-                <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
-                  {rows.length ? 'Sin resultados para los filtros aplicados' : 'Aun no hay asistencias registradas'}
+                <td colSpan={7} className="px-4 py-6 text-center text-slate-500">
+                  {rows.length
+                    ? 'Sin resultados para los filtros aplicados'
+                    : 'Sin personal ni marcaciones para el rango seleccionado'}
                 </td>
               </tr>
             )}
@@ -414,8 +515,8 @@ export function AdminAttendancePage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
             <p className="text-sm text-slate-500">
-              Mostrando {(currentPage - 1) * pageSize + 1}-
-              {Math.min(currentPage * pageSize, filtered.length)} de {filtered.length} asistencias
+              Mostrando {(currentPage - 1) * pageSize + 1} al{' '}
+              {Math.min(currentPage * pageSize, filtered.length)} de {filtered.length} registros
             </p>
 
             <label className="flex items-center gap-2 text-sm text-slate-600">
@@ -435,43 +536,54 @@ export function AdminAttendancePage() {
             </label>
           </div>
 
-          {totalPages > 1 && (
-          <div className="flex flex-wrap justify-end gap-2">
+          <nav
+            className="inline-flex self-end overflow-hidden rounded-md border border-slate-200 bg-white"
+            aria-label="Paginacion de asistencias"
+          >
             <button
               type="button"
               disabled={currentPage === 1}
               onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-              className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="border-r border-slate-200 px-3 py-2 text-sm font-semibold text-brand-blue transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-white"
             >
-              Anterior
+              &laquo; Anterior
             </button>
 
-            {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
-              <button
-                key={page}
-                type="button"
-                onClick={() => setCurrentPage(page)}
-                className={[
-                  'h-9 min-w-9 rounded-md border px-3 text-sm font-semibold transition',
-                  currentPage === page
-                    ? 'border-brand-blue bg-brand-blue text-white'
-                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
-                ].join(' ')}
-              >
-                {page}
-              </button>
-            ))}
+            {paginationItems.map((item, index) =>
+              item === 'ellipsis' ? (
+                <span
+                  key={`ellipsis-${index}`}
+                  className="grid min-w-9 place-items-center border-r border-slate-200 px-2 text-sm font-semibold text-slate-400"
+                  aria-hidden="true"
+                >
+                  ...
+                </span>
+              ) : (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => setCurrentPage(item)}
+                  className={[
+                    'min-w-9 border-r border-slate-200 px-3 py-2 text-sm font-semibold transition last:border-r-0',
+                    currentPage === item
+                      ? 'bg-brand-blue text-white'
+                      : 'text-brand-blue hover:bg-slate-50',
+                  ].join(' ')}
+                >
+                  {item}
+                </button>
+              ),
+            )}
 
             <button
               type="button"
               disabled={currentPage === totalPages}
               onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
-              className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="px-3 py-2 text-sm font-semibold text-brand-blue transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-white"
             >
-              Siguiente
+              Siguiente &raquo;
             </button>
-          </div>
-          )}
+          </nav>
         </div>
       )}
     </div>

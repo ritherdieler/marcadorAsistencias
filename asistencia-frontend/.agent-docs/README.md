@@ -38,11 +38,17 @@ Documentacion tecnica de features implementadas en `asistencia-frontend`. Manten
 | [`auth-token-refresh.md`](auth-token-refresh.md) | Autenticacion Bearer + refresh de token y manejo de 401 |
 | [`vite-dev-cleanup.md`](vite-dev-cleanup.md) | Limpieza de cache Vite en dev |
 | [`observability-web-sdk.md`](observability-web-sdk.md) | SDK web de observabilidad (errores, breadcrumbs, rrweb), bloqueo biometrico y `VITE_OBS_*` |
+| [`production-api-url.md`](production-api-url.md) | URL de API de produccion y variables de entorno |
+| [`attendance-report-no-marco.md`](attendance-report-no-marco.md) | Reporte admin: personal × fecha, estados FALTÓ / FERIADO |
+| [`attendance-marking-config.md`](attendance-marking-config.md) | Quien marca en kiosko y entra al reporte (exentos) |
 
 ## Cambios recientes (referencia rapida)
 
 | Fecha | Feature | Docs actualizados |
 |-------|---------|-------------------|
+| 2026-09-15 | Exentos de marcacion (kiosko + reporte) | `attendance-marking-config.md` |
+| 2026-09-15 | Estados FALTÓ y FERIADO + config feriados en Horario | `attendance-report-no-marco.md` |
+| 2026-09-14 | Reporte asistencias con NO MARCÓ (fase 1) | `attendance-report-no-marco.md` |
 | 2026-06-25 | Guia estilo bancario (silueta SVG, scrim, anillo) | `face-position-guide.md` |
 | 2026-06-25 | Alineacion obligatoria antes del reto activo | `face-vision-unified.md`, `face-recognition-active-challenge.md` |
 | 2026-06-25 | Banda too_close = min(objetivo x 1.35, 75%) | `face-position-guide.md`, `face-registration-ux.md` |

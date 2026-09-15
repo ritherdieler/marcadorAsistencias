@@ -120,7 +120,9 @@ export function AdminFaceCoveragePage() {
   )
 
   const hasPendingChanges = useMemo(
-    () => !faceCoverageConfigsEqual(draft, config) || !faceChallengeConfigsEqual(challengeDraft, challengeConfig),
+    () =>
+      !faceCoverageConfigsEqual(draft, config)
+      || !faceChallengeConfigsEqual(challengeDraft, challengeConfig),
     [challengeConfig, challengeDraft, config, draft],
   )
 
@@ -222,7 +224,7 @@ export function AdminFaceCoveragePage() {
       }
       setAlert({
         variant: 'success',
-        message: 'Configuracion facial guardada. Se aplicara en marcacion y registro.',
+        message: 'Configuracion facial guardada. Se aplicara en este navegador para marcacion y registro.',
       })
     } finally {
       setSaving(false)
@@ -246,7 +248,7 @@ export function AdminFaceCoveragePage() {
     setChallengeDraft(cloneChallengeConfig(challengeDefaults))
     setAlert({
       variant: 'info',
-      message: `Valores recomendados restaurados: marcacion ${DEFAULT_FACE_COVERAGE_CONFIG.attendance.targetWidthPercent}% (ratio ${DEFAULT_FACE_COVERAGE_CONFIG.attendance.upperWidthRatio}x), registro ${DEFAULT_FACE_COVERAGE_CONFIG.registration.targetWidthPercent}% (ratio ${DEFAULT_FACE_COVERAGE_CONFIG.registration.upperWidthRatio}x), reto activo incluido.`,
+      message: `Valores recomendados restaurados: marcacion ${DEFAULT_FACE_COVERAGE_CONFIG.attendance.targetWidthPercent}% (ratio ${DEFAULT_FACE_COVERAGE_CONFIG.attendance.upperWidthRatio}x), registro ${DEFAULT_FACE_COVERAGE_CONFIG.registration.targetWidthPercent}% (ratio ${DEFAULT_FACE_COVERAGE_CONFIG.registration.upperWidthRatio}x) y reto activo incluido.`,
     })
   }
 

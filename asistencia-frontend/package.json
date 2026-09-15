@@ -10,6 +10,8 @@
     "dev": "vite",
     "dev:fresh": "npm run clean:all && bash scripts/ensure-deps.sh",
     "build": "tsc && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "preview": "vite preview"
   },
   "devDependencies": {
@@ -20,7 +22,8 @@
     "postcss": "^8.5.14",
     "tailwindcss": "^3.4.17",
     "typescript": "~6.0.2",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "vitest": "^3.2.4"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.35",

@@ -37,6 +37,16 @@ import {
 } from '../../recognition/services/faceAlignment'
 import { useFaceCoverageConfig } from '../../recognition/hooks/useFaceCoverageConfig'
 import { yieldToUi } from '../../../utils/yieldToUi'
+import { useAttendanceScheduleConfig } from '../../settings/hooks/useAttendanceScheduleConfig'
+import { useAttendanceMarkingConfig } from '../../settings/hooks/useAttendanceMarkingConfig'
+import {
+  ATTENDANCE_MARKING_BLOCKED_MESSAGE,
+  isUserRequiredToMark,
+} from '../../settings/services/attendanceMarkingConfig'
+import {
+  getLateAfterLabel,
+  resolveAttendanceStatus,
+} from '../../settings/services/attendanceScheduleConfig'
 
 type CapturePhase = 'idle' | 'capturing' | 'identifying' | 'confirming'
 
@@ -67,6 +77,10 @@ function getCurrentTimeLabel() {
   return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
+function rejectIfUserCannotMark(user: User, markingConfig: { exemptUserIds: number[] }): boolean {
+  return !isUserRequiredToMark(markingConfig, user.id)
+}
+
 function didFaceChangeSignificantly(previous: FaceBox | null, current?: FaceBox): boolean {
   if (!previous || !current) return false
 
@@ -91,6 +105,8 @@ export function AttendanceMarker() {
   } = useFaceCoverageConfig()
   const alignmentConfig = getRuntimeConfig('attendance')
   const { config: challengeConfig, enabled: challengeEnabled } = useFaceChallengeConfig()
+  const { config: attendanceScheduleConfig } = useAttendanceScheduleConfig()
+  const { config: attendanceMarkingConfig } = useAttendanceMarkingConfig()
   const { videoRef, start, stop, stream, error: cameraError } = useCamera()
   const {
     isOnline,
@@ -136,6 +152,7 @@ export function AttendanceMarker() {
   const [backendChallengeEnabled, setBackendChallengeEnabled] = useState(false)
 
   const effectiveLivenessRequired = challengeEnabled || (backendChallengeEnabled && isOnline)
+  const lateAfterLabel = getLateAfterLabel(attendanceScheduleConfig)
 
   const resetChallenge = useCallback(
     (backendEnabledOverride?: boolean, preserveTurnType = false) => {
@@ -535,6 +552,17 @@ export function AttendanceMarker() {
         return
       }
 
+      if (rejectIfUserCannotMark(identifyResult.user, attendanceMarkingConfig)) {
+        setMessage(null)
+        setResult({
+          title: 'Marcacion no permitida',
+          description: ATTENDANCE_MARKING_BLOCKED_MESSAGE,
+          statusLabel: 'Exento',
+          variant: 'warning',
+        })
+        return
+      }
+
       setMessage(null)
       setIdentifiedWithPreview({
         user: identifyResult.user,
@@ -555,6 +583,17 @@ export function AttendanceMarker() {
             setUnrecognizedDialog(
               offlineResult.message ?? 'Sin conexion. No pudimos reconocer el rostro con el dataset offline guardado.',
             )
+            return
+          }
+
+          if (rejectIfUserCannotMark(offlineResult.user, attendanceMarkingConfig)) {
+            setMessage(null)
+            setResult({
+              title: 'Marcacion no permitida',
+              description: ATTENDANCE_MARKING_BLOCKED_MESSAGE,
+              statusLabel: 'Exento',
+              variant: 'warning',
+            })
             return
           }
 
@@ -585,7 +624,7 @@ export function AttendanceMarker() {
       setCapturePhase('idle')
       setCaptureProgress(0)
     }
-  }, [alignmentConfig, cameraEnabled, cameraReady, capturePhase, challengeConfig, clearCurrentIdentity, confirming, effectiveLivenessRequired, identified, identifying, reportConnectionError, requestChallengeToken, result, setIdentifiedWithPreview, stream, unrecognizedDialog, videoRef])
+  }, [alignmentConfig, attendanceMarkingConfig, cameraEnabled, cameraReady, capturePhase, challengeConfig, clearCurrentIdentity, confirming, effectiveLivenessRequired, identified, identifying, reportConnectionError, requestChallengeToken, result, setIdentifiedWithPreview, stream, unrecognizedDialog, videoRef])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -597,12 +636,30 @@ export function AttendanceMarker() {
 
   async function confirmAttendance() {
     if (!identified) return
+    if (rejectIfUserCannotMark(identified.user, attendanceMarkingConfig)) {
+      setResult({
+        title: 'Marcacion no permitida',
+        description: ATTENDANCE_MARKING_BLOCKED_MESSAGE,
+        statusLabel: 'Exento',
+        variant: 'warning',
+      })
+      clearCurrentIdentity(false)
+      return
+    }
 
     setConfirming(true)
     setCapturePhase('confirming')
     setCaptureProgress(95)
+    const occurredAtMillis = Date.now()
+    const attendanceStatus = resolveAttendanceStatus(occurredAtMillis, attendanceScheduleConfig)
     try {
-      const res = await verifyFacePhoto(identified.photo, 'CHECK_IN', undefined, challengeTokenRef.current)
+      const res = await verifyFacePhoto(
+        identified.photo,
+        'CHECK_IN',
+        occurredAtMillis,
+        attendanceStatus,
+        challengeTokenRef.current,
+      )
       if (res.challengeRequired) {
         handleChallengeRejected()
         return
@@ -639,7 +696,7 @@ export function AttendanceMarker() {
         description: res.alreadyRegistered
           ? `Tu asistencia de hoy ya fue registrada a las ${checkInTime}.`
           : isLate
-            ? `Tu ingreso fue registrado a las ${checkInTime}. Como es despues de las 8:15AM, queda marcado como tardanza.`
+            ? `Tu ingreso fue registrado a las ${checkInTime}. Como es despues de las ${lateAfterLabel}, queda marcado como tardanza.`
             : `Tu ingreso fue registrado correctamente a las ${checkInTime}.`,
         statusLabel: isLate ? 'Tardanza' : 'Puntual',
         checkInTime,
@@ -655,6 +712,7 @@ export function AttendanceMarker() {
           userId: identified.user.id,
           userName: identified.user.name,
           faceDataId: identified.faceDataId ?? null,
+          attendanceStatus,
           score: identified.score ?? null,
         })
         reportConnectionError()
@@ -681,6 +739,17 @@ export function AttendanceMarker() {
   }
 
   async function markCheckOut() {
+    if (identified && rejectIfUserCannotMark(identified.user, attendanceMarkingConfig)) {
+      setResult({
+        title: 'Marcacion no permitida',
+        description: ATTENDANCE_MARKING_BLOCKED_MESSAGE,
+        statusLabel: 'Exento',
+        variant: 'warning',
+      })
+      clearCurrentIdentity(false)
+      return
+    }
+
     setCheckingOut(true)
     setCapturePhase('confirming')
     setCaptureProgress(95)
@@ -709,7 +778,7 @@ export function AttendanceMarker() {
         return
       }
 
-      const res = await verifyFacePhoto(photo, 'CHECK_OUT', undefined, challengeTokenRef.current)
+      const res = await verifyFacePhoto(photo, 'CHECK_OUT', undefined, undefined, challengeTokenRef.current)
       setCaptureProgress(100)
       if (res.challengeRequired) {
         handleChallengeRejected()
@@ -783,9 +852,13 @@ export function AttendanceMarker() {
 
     setFallbackLoading(true)
     try {
+      const occurredAtMillis = Date.now()
+      const attendanceStatus = resolveAttendanceStatus(occurredAtMillis, attendanceScheduleConfig)
       const res = await verifyAttendanceWithPassword({
         username,
         password: fallbackPassword,
+        occurredAtMillis,
+        attendanceStatus,
       })
 
       if (!res.matched) {
