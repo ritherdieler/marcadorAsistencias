@@ -1,5 +1,9 @@
 import type { Breadcrumb, BreadcrumbCategory, ObsSeverity } from './types'
 
+export const BREADCRUMB_MAX_MESSAGE_CHARS = 300
+
+export const BREADCRUMB_MAX_DATA_CHARS = 1000
+
 export class BreadcrumbBuffer {
   private items: Breadcrumb[] = []
 
@@ -15,7 +19,13 @@ export class BreadcrumbBuffer {
     data?: Record<string, unknown>,
     level?: ObsSeverity,
   ): void {
-    this.items.push({ category, message, data, level, timestamp: Date.now() })
+    this.items.push({
+      category,
+      message: message.slice(0, BREADCRUMB_MAX_MESSAGE_CHARS),
+      data: boundData(data),
+      level,
+      timestamp: Date.now(),
+    })
     if (this.items.length > this.max) {
       this.items.splice(0, this.items.length - this.max)
     }
@@ -28,4 +38,16 @@ export class BreadcrumbBuffer {
   clear(): void {
     this.items = []
   }
+}
+
+function boundData(data?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!data) return undefined
+  let serialized: string
+  try {
+    serialized = JSON.stringify(data)
+  } catch {
+    return undefined
+  }
+  if (!serialized) return undefined
+  return serialized.length > BREADCRUMB_MAX_DATA_CHARS ? { truncated: true } : data
 }

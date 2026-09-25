@@ -14,7 +14,7 @@ import type {
   ObsSeverity,
 } from './types'
 
-const DEFAULT_BREADCRUMBS = 40
+const DEFAULT_BREADCRUMBS = 20
 const DEFAULT_REPLAY_WINDOW_MS = 90000
 const DEFAULT_MAX_REPLAYS = 10
 const MAX_REPLAY_BYTES = 15 * 1024 * 1024
