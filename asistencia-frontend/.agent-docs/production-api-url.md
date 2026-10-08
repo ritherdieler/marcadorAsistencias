@@ -5,7 +5,7 @@
 ## URL actual
 
 ```
-https://api.gigafiberperu.cloud/ispadmin
+https://api.gigafiberperu.tech/ispadmin
 ```
 
 ## URL anterior
@@ -22,7 +22,7 @@ La URL anterior dejó de funcionar externamente tras el cambio.
 `asistencia-frontend/.env`:
 
 ```dotenv
-VITE_API_BASE_URL=https://api.gigafiberperu.cloud/ispadmin
+VITE_API_BASE_URL=https://api.gigafiberperu.tech/ispadmin
 ```
 
 ## Tras cambiar la URL

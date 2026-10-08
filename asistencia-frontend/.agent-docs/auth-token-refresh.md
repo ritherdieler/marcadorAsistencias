@@ -3,8 +3,8 @@
 Build verified: `npm run build` (2026-07-13).
 
 > **Proyecto interno — no se despliega en subdominio publico.** Asistencias es de uso interno:
-> adopta esta autenticacion por token, pero **no** se publica en `asistencias.gigafiberperu.cloud`
-> ni lleva SSL. Su acceso/distribucion es interno. (El backend `api.gigafiberperu.cloud/ispadmin`
+> adopta esta autenticacion por token, pero **no** se publica en `asistencias.gigafiberperu.tech`
+> ni lleva SSL. Su acceso/distribucion es interno. (El backend `api.gigafiberperu.tech/ispadmin`
 > que consume si es publico.)
 
 ## Contrato del backend

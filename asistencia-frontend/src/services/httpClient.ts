@@ -11,7 +11,7 @@ type RetryableConfig = InternalAxiosRequestConfig & { _retry?: boolean }
 
 const LOGIN_ROUTE = '/login'
 const TERMINAL_ROUTE = '/terminal'
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'https://api.gigafiberperu.cloud/ispadmin'
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'https://api.gigafiberperu.tech/ispadmin'
 const PUBLIC_PATHS = [
   '/users/login',
   '/users/token/refresh',

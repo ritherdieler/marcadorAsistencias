@@ -69,8 +69,8 @@ Ademas, el interceptor axios solo registra metodo, ruta (sin query string), stat
 
 | Variable | Descripcion | Dev | Prod |
 |----------|-------------|-----|------|
-| `VITE_OBS_BASE_URL` | URL base del hub (hoy = backend actual) | `http://localhost:8080/ispadmin` | `https://api.gigafiberperu.cloud/ispadmin` |
-| `VITE_OBS_WS_URL` | WebSocket del hub (para el dashboard) | `http://localhost:8080/ispadmin/ws` | `https://api.gigafiberperu.cloud/ispadmin/ws` |
+| `VITE_OBS_BASE_URL` | URL base del hub (hoy = backend actual) | `http://localhost:8080/ispadmin` | `https://api.gigafiberperu.tech/ispadmin` |
+| `VITE_OBS_WS_URL` | WebSocket del hub (para el dashboard) | `http://localhost:8080/ispadmin/ws` | `https://api.gigafiberperu.tech/ispadmin/ws` |
 | `VITE_OBS_API_KEY` | API key por plataforma | `dev-obs-asistencias-key` | reemplazar en prod |
 | `VITE_OBS_ENABLED` | (opcional) `false` desactiva el SDK | - | - |
 | `VITE_OBS_ENVIRONMENT` | (opcional) fuerza `prod/dev/local` | - | - |

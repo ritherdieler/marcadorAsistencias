@@ -16,7 +16,7 @@ Crea un archivo `.env` en la raiz:
 VITE_API_BASE_URL=http://localhost:8080/ispadmin
 
 # Produccion (URL actual desde 2026-07-04):
-# VITE_API_BASE_URL=https://api.gigafiberperu.cloud/ispadmin
+# VITE_API_BASE_URL=https://api.gigafiberperu.tech/ispadmin
 ```
 
 El archivo `.env` del repo ya apunta a produccion HTTPS. Para desarrollo local cambiar la variable.
